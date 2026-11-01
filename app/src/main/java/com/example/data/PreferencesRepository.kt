@@ -27,18 +27,18 @@ class PreferencesRepository(context: Context) {
         return try {
             val obj = JSONObject(rawJson)
             val themeMode = runCatching {
-                ThemeMode.valueOf(obj.optString("themeMode", ThemeMode.DARK.name))
-            }.getOrDefault(ThemeMode.DARK)
+                ThemeMode.valueOf(obj.optString("themeMode", ThemeMode.LIGHT.name))
+            }.getOrDefault(ThemeMode.LIGHT)
             val colorPreset = runCatching {
-                ColorPreset.valueOf(obj.optString("colorPreset", ColorPreset.OCEAN_BLUE.name))
-            }.getOrDefault(ColorPreset.OCEAN_BLUE)
+                ColorPreset.valueOf(obj.optString("colorPreset", ColorPreset.EMERALD_ANIME.name))
+            }.getOrDefault(ColorPreset.EMERALD_ANIME)
             ThemeSettings(
                 themeMode = themeMode,
                 colorPreset = colorPreset,
                 useDynamicColor = obj.optBoolean("useDynamicColor", false),
                 pureBlackAmoled = obj.optBoolean("pureBlackAmoled", false),
-                editorFontSizeSp = obj.optInt("editorFontSizeSp", 13).coerceIn(11, 17),
-                useMonospaceFont = obj.optBoolean("useMonospaceFont", true)
+                editorFontSizeSp = obj.optInt("editorFontSizeSp", 16).coerceIn(11, 20),
+                useMonospaceFont = obj.optBoolean("useMonospaceFont", false)
             )
         } catch (_: Exception) {
             ThemeSettings()

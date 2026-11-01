@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,7 +28,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -36,18 +36,21 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -55,6 +58,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -64,21 +68,30 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.model.AiProviderSettings
 import com.example.model.BatchJobItem
 import com.example.model.BatchJobStatus
 import com.example.model.BatchQueueState
 import com.example.model.FileConflictPolicy
 import com.example.model.TargetLanguageOption
+import com.example.ui.theme.ForestGreenPrimary
+import com.example.ui.theme.RetryAmberOrange
+import com.example.ui.theme.SageHighlightFill
 import com.example.viewmodel.SubtitleUiState
 import com.example.viewmodel.SubtitleViewModel
 import java.io.File
@@ -96,7 +109,9 @@ fun BatchQueueTabScreen(
 ) {
     val expandedErrorJobIds = remember { mutableStateMapOf<String, Boolean>() }
     var showOutputFolderInspectorDialog by remember { mutableStateOf(false) }
-    var showConfigDetails by remember { mutableStateOf(false) }
+    var showConfigDetails by rememberSaveable { mutableStateOf(false) }
+    var showFolderConfig by rememberSaveable { mutableStateOf(false) }
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -106,95 +121,399 @@ fun BatchQueueTabScreen(
 
     val sortedJobs = batchState.sortedJobs
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .testTag("batch_queue_screen"),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            .testTag("batch_queue_screen")
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // 1. Header & File Selection Controls
-        item {
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(bottom = 12.dp)
+        ) {
+            // 1. Top Circular Progress & 4-Counter Dashboard Card matching Panel 3
+            item(key = "batch_circular_dashboard_card") {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("batch_summary_card"),
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                    )
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
-                                text = "Batch Subtitle Translation Queue",
-                                style = MaterialTheme.typography.titleMedium,
+                                text = "Batch Translation",
+                                style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold
                             )
-                            Text(
-                                text = "Terjemahkan banyak file (.srt, .vtt, .ass, .ssa) secara berurutan dengan validasi struktur & retry otomatis di akhir antrean.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
 
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(
-                            onClick = onSelectMultipleFiles,
-                            enabled = !batchState.isRunning,
-                            modifier = Modifier.testTag("batch_select_files_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Pilih Banyak File Subtitle",
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Pilih Banyak File Subtitle")
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                IconButton(
+                                    onClick = { showFolderConfig = !showFolderConfig },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Folder,
+                                        contentDescription = "Output Folder Batch",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { showConfigDetails = !showConfigDetails },
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .testTag("batch_toggle_config_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MoreVert,
+                                        contentDescription = "Pengaturan Batch"
+                                    )
+                                }
+                            }
                         }
 
-                        OutlinedButton(
-                            onClick = { viewModel.loadSampleEpisodeFilesToBatchQueue() },
-                            enabled = !batchState.isRunning,
-                            modifier = Modifier.testTag("batch_load_samples_button")
+                        // Circular Progress Ring (3/4 Selesai) + 4 Metric Columns
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(18.dp)
                         ) {
-                            Text("Muat 4 File Sampel Episode")
-                        }
-                    }
-
-                    if (batchState.preFlightWarnings.isNotEmpty()) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("batch_preflight_warnings")
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            // Left: Circular Progress Ring
+                            Box(
+                                modifier = Modifier.size(92.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Text(
-                                    text = "Peringatan Praperiksa File:",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onErrorContainer
-                                )
-                                batchState.preFlightWarnings.forEach { warn ->
+                                val progressFraction = if (batchState.totalFiles > 0) {
+                                    (batchState.completedCount.toFloat() / batchState.totalFiles.toFloat()).coerceIn(0f, 1f)
+                                } else {
+                                    0f
+                                }
+                                val ringColor = if (isDark) MaterialTheme.colorScheme.primary else ForestGreenPrimary
+                                val trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
+
+                                Canvas(modifier = Modifier.fillMaxSize()) {
+                                    val strokeWidth = 8.dp.toPx()
+                                    drawArc(
+                                        color = trackColor,
+                                        startAngle = 0f,
+                                        sweepAngle = 360f,
+                                        useCenter = false,
+                                        style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                                    )
+                                    drawArc(
+                                        color = ringColor,
+                                        startAngle = -90f,
+                                        sweepAngle = 360f * progressFraction,
+                                        useCenter = false,
+                                        style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                                    )
+                                }
+
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
-                                        text = "• $warn",
-                                        style = MaterialTheme.typography.bodySmall,
+                                        text = "${batchState.completedCount}/${batchState.totalFiles}",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.testTag("batch_overall_progress_text")
+                                    )
+                                    Text(
+                                        text = "Selesai",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            // Right: 4 Metric Counters (Total, Selesai, Proses, Ulang)
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                BatchStatColumn(
+                                    value = "${batchState.totalFiles}",
+                                    label = "Total",
+                                    badgeBg = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    valueColor = MaterialTheme.colorScheme.onSurface,
+                                    testTagId = "metric_total"
+                                )
+                                BatchStatColumn(
+                                    value = "${batchState.completedCount}",
+                                    label = "Selesai",
+                                    badgeBg = if (isDark) Color(0xFF1F422F) else SageHighlightFill,
+                                    valueColor = if (isDark) Color(0xFF8CE0AF) else ForestGreenPrimary,
+                                    testTagId = "metric_completed"
+                                )
+                                BatchStatColumn(
+                                    value = "${batchState.processingCount + batchState.queuedCount}",
+                                    label = "Proses",
+                                    badgeBg = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    valueColor = Color(0xFF4F5BD5),
+                                    testTagId = "metric_processing"
+                                )
+                                BatchStatColumn(
+                                    value = "${batchState.retryQueuedCount + batchState.needsAttentionCount}",
+                                    label = "Ulang",
+                                    badgeBg = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    valueColor = RetryAmberOrange,
+                                    testTagId = "metric_retry_queued"
+                                )
+                            }
+                        }
+
+                        // Quick File Picker & Sample Loader Row
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onSelectMultipleFiles,
+                                enabled = !batchState.isRunning,
+                                shape = RoundedCornerShape(50),
+                                modifier = Modifier.testTag("batch_select_files_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Pilih Banyak File Subtitle",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Pilih Banyak File", style = MaterialTheme.typography.labelMedium)
+                            }
+
+                            OutlinedButton(
+                                onClick = { viewModel.loadSampleEpisodeFilesToBatchQueue() },
+                                enabled = !batchState.isRunning,
+                                shape = RoundedCornerShape(50),
+                                modifier = Modifier.testTag("batch_load_samples_button")
+                            ) {
+                                Text("Muat 4 Sampel Episode", style = MaterialTheme.typography.labelMedium)
+                            }
+
+                            OutlinedButton(
+                                onClick = { showFolderConfig = !showFolderConfig },
+                                shape = RoundedCornerShape(50)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FolderOpen,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Output Folder", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+
+                        if (batchState.preFlightWarnings.isNotEmpty()) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("batch_preflight_warnings")
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = "Peringatan Praperiksa File:",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                    batchState.preFlightWarnings.forEach { warn ->
+                                        Text(
+                                            text = "• $warn",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onErrorContainer
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (batchState.statusBannerMessage != null) {
+                            Text(
+                                text = batchState.statusBannerMessage,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.testTag("batch_status_banner_text")
+                            )
+                        }
+
+                        if (batchState.lastNotificationTitle != null && batchState.lastNotificationMessage != null) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("batch_last_notification_card")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.NotificationsActive,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = batchState.lastNotificationTitle,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                        Text(
+                                            text = batchState.lastNotificationMessage,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Dedicated Batch Output Folder Card (Always accessible & expandable)
+            item(key = "batch_output_folder_card_item") {
+                AnimatedVisibility(visible = showFolderConfig || !batchState.isOutputFolderWritable) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("batch_output_folder_card"),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Folder,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "Output Folder Khusus Batch",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+
+                                Surface(
+                                    color = if (batchState.isOutputFolderWritable) {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.errorContainer
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.testTag("batch_folder_writable_badge")
+                                ) {
+                                    Text(
+                                        text = if (batchState.isOutputFolderWritable) "Dapat Ditulisi" else "Akses Ditolak",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (batchState.isOutputFolderWritable) {
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.onErrorContainer
+                                        },
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = batchState.outputFolderDisplayName,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.testTag("batch_output_folder_path_text")
+                            )
+
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = onChooseOutputFolder,
+                                    enabled = !batchState.isRunning,
+                                    modifier = Modifier.testTag("batch_choose_output_folder_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FolderOpen,
+                                        contentDescription = "Choose Output Folder",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Choose Output Folder")
+                                }
+
+                                OutlinedButton(
+                                    onClick = { showOutputFolderInspectorDialog = true },
+                                    modifier = Modifier.testTag("batch_open_output_folder_button")
+                                ) {
+                                    Text("Open Output Folder")
+                                }
+                            }
+
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+
+                            Text(
+                                text = "Kebijakan Konflik Nama File:",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                FileConflictPolicy.entries.forEach { policy ->
+                                    FilterChip(
+                                        selected = batchState.conflictPolicy == policy,
+                                        onClick = {
+                                            if (!batchState.isRunning) {
+                                                viewModel.setBatchConflictPolicy(policy)
+                                            }
+                                        },
+                                        label = { Text(policy.label, style = MaterialTheme.typography.labelSmall) },
+                                        modifier = Modifier.testTag("batch_conflict_policy_${policy.name}")
                                     )
                                 }
                             }
@@ -202,170 +521,28 @@ fun BatchQueueTabScreen(
                     }
                 }
             }
-        }
 
-        // 2. Dedicated Batch Output Folder Card
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("batch_output_folder_card"),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(
+            // 3. Expandable AI, Retry & Notification Config Card
+            item(key = "batch_config_card_item") {
+                AnimatedVisibility(visible = showConfigDetails) {
+                    Card(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Folder,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = "Output Folder Khusus Batch",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-
-                        Surface(
-                            color = if (batchState.isOutputFolderWritable) {
-                                MaterialTheme.colorScheme.primaryContainer
+                            val targetLangDisplay = if (uiState.targetLanguageOption == TargetLanguageOption.CUSTOM) {
+                                uiState.customTargetLanguage
                             } else {
-                                MaterialTheme.colorScheme.errorContainer
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.testTag("batch_folder_writable_badge")
-                        ) {
-                            Text(
-                                text = if (batchState.isOutputFolderWritable) "Dapat Ditulisi" else "Akses Ditolak",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (batchState.isOutputFolderWritable) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onErrorContainer
-                                },
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
+                                uiState.targetLanguageOption.label
+                            }
 
-                    Text(
-                        text = batchState.outputFolderDisplayName,
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.testTag("batch_output_folder_path_text")
-                    )
-
-                    if (batchState.outputFolderValidationMessage != null) {
-                        Text(
-                            text = batchState.outputFolderValidationMessage,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = onChooseOutputFolder,
-                            enabled = !batchState.isRunning,
-                            modifier = Modifier.testTag("batch_choose_output_folder_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.FolderOpen,
-                                contentDescription = "Choose Output Folder",
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Choose Output Folder")
-                        }
-
-                        OutlinedButton(
-                            onClick = { showOutputFolderInspectorDialog = true },
-                            modifier = Modifier.testTag("batch_open_output_folder_button")
-                        ) {
-                            Text("Open Output Folder")
-                        }
-
-                        TextButton(
-                            onClick = { viewModel.resetBatchOutputFolderToDefault() },
-                            enabled = !batchState.isRunning
-                        ) {
-                            Text("Reset ke Default")
-                        }
-                    }
-
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-
-                    Text(
-                        text = "Kebijakan Konflik Nama File:",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        FileConflictPolicy.entries.forEach { policy ->
-                            FilterChip(
-                                selected = batchState.conflictPolicy == policy,
-                                onClick = {
-                                    if (!batchState.isRunning) {
-                                        viewModel.setBatchConflictPolicy(policy)
-                                    }
-                                },
-                                label = { Text(policy.label, style = MaterialTheme.typography.labelSmall) },
-                                modifier = Modifier.testTag("batch_conflict_policy_${policy.name}")
-                            )
-                        }
-                    }
-                    Text(
-                        text = batchState.conflictPolicy.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-
-        // 3. Translation Settings, Retry Limit & Phone Notification Card
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    val targetLangDisplay = if (uiState.targetLanguageOption == TargetLanguageOption.CUSTOM) {
-                        uiState.customTargetLanguage
-                    } else {
-                        uiState.targetLanguageOption.label
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "Pengaturan AI, Retry & Notifikasi",
                                 style = MaterialTheme.typography.titleSmall,
@@ -376,26 +553,7 @@ fun BatchQueueTabScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        }
-                        IconButton(
-                            onClick = { showConfigDetails = !showConfigDetails },
-                            modifier = Modifier.testTag("batch_toggle_config_button")
-                        ) {
-                            Icon(
-                                imageVector = if (showConfigDetails) Icons.Default.ExpandLess else Icons.Default.Tune,
-                                contentDescription = "Pengaturan Batch"
-                            )
-                        }
-                    }
 
-                    AnimatedVisibility(visible = showConfigDetails) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            HorizontalDivider()
-                            Text(
-                                text = "Batas Maksimum Retry per File (Jika Gagal Validasi/Error):",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
                             FlowRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -415,28 +573,17 @@ fun BatchQueueTabScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.NotificationsActive,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Notifikasi ke Ponsel Saat Batch Selesai",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium
                                     )
-                                    Column {
-                                        Text(
-                                            text = "Notifikasi ke Ponsel Saat Batch Selesai",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Text(
-                                            text = "Kirim notifikasi sistem ketika seluruh antrean selesai atau membutuhkan perhatian.",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
+                                    Text(
+                                        text = "Kirim notifikasi sistem ketika seluruh antrean selesai.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                                 Switch(
                                     checked = batchState.notificationsEnabled,
@@ -455,317 +602,73 @@ fun BatchQueueTabScreen(
                                 onClick = onNavigateToExtractSettings,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("Ubah Bahasa Target / Model / Cookie AI di Tab Ekstrak")
+                                Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Ubah Bahasa Target / Model / Cookie AI")
                             }
                         }
                     }
                 }
             }
-        }
 
-        // 4. Real-Time Batch Summary Dashboard & Progress
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("batch_summary_card"),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Ringkasan & Progres Antrean",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "${batchState.overallProgressPercent}%",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.testTag("batch_overall_progress_text")
-                        )
-                    }
-
-                    LinearProgressIndicator(
-                        progress = { batchState.overallProgressPercent / 100f },
+            // 4. Sequential File Queue Cards matching Panel 3
+            if (sortedJobs.isEmpty()) {
+                item(key = "batch_empty_state") {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(18.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(8.dp)
-                            .testTag("batch_overall_progress_bar")
+                            .testTag("batch_empty_queue_placeholder")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Antrean Batch Masih Kosong",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Klik 'Pilih Banyak File' atau 'Muat 4 Sampel Episode' untuk memulai antrean terjemahan berurutan.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            } else {
+                itemsIndexed(
+                    items = sortedJobs,
+                    key = { _, job -> job.jobId }
+                ) { index, job ->
+                    val isErrorExpanded = expandedErrorJobIds[job.jobId] == true
+                    BatchQueueJobItemCard(
+                        index = index,
+                        totalJobs = sortedJobs.size,
+                        job = job,
+                        isQueueRunning = batchState.isRunning,
+                        isErrorExpanded = isErrorExpanded,
+                        onToggleErrorDetails = {
+                            expandedErrorJobIds[job.jobId] = !isErrorExpanded
+                        },
+                        onMoveUp = { viewModel.moveBatchJobUp(job.jobId) },
+                        onMoveDown = { viewModel.moveBatchJobDown(job.jobId) },
+                        onRemove = { viewModel.removeBatchJob(job.jobId) }
                     )
-
-                    // Metrics Grid
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        SummaryMetricChip("Total Files", "${batchState.totalFiles}", "metric_total")
-                        SummaryMetricChip("Completed", "${batchState.completedCount}", "metric_completed")
-                        SummaryMetricChip("Processing", "${batchState.processingCount}", "metric_processing")
-                        SummaryMetricChip("Queued", "${batchState.queuedCount}", "metric_queued")
-                        SummaryMetricChip("Retry Queued", "${batchState.retryQueuedCount}", "metric_retry_queued")
-                        SummaryMetricChip("Needs Attention", "${batchState.needsAttentionCount}", "metric_needs_attention")
-                    }
-
-                    val activeJob = batchState.currentJob
-                    if (activeJob != null) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Text(
-                                    text = "Current File: ${activeJob.displayTitleWithRetryTag}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                                Text(
-                                    text = "Current Attempt: #${batchState.currentAttemptDisplay} dari ${activeJob.maxRetries} • Status: ${activeJob.status.displayLabel} (${activeJob.translatedCuesProgress}/${activeJob.totalCues} entri)",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                                val etaMs = batchState.estimatedRemainingMs
-                                if (etaMs != null && etaMs > 0L) {
-                                    Text(
-                                        text = "Estimasi Sisa Waktu: ~${(etaMs / 1000L).coerceAtLeast(1L)} detik",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    if (batchState.statusBannerMessage != null) {
-                        Text(
-                            text = batchState.statusBannerMessage,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.testTag("batch_status_banner_text")
-                        )
-                    }
-
-                    if (batchState.lastNotificationTitle != null && batchState.lastNotificationMessage != null) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("batch_last_notification_card")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.NotificationsActive,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = batchState.lastNotificationTitle,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                                    )
-                                    Text(
-                                        text = batchState.lastNotificationMessage,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // 5. Queue Control Buttons
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (!batchState.isRunning && !batchState.isPaused) {
-                            Button(
-                                onClick = { viewModel.startBatchTranslationQueue() },
-                                enabled = batchState.queuedCount + batchState.retryQueuedCount > 0,
-                                modifier = Modifier.testTag("batch_start_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = "Start Batch",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Start Batch")
-                            }
-                        }
-
-                        if (batchState.isRunning) {
-                            OutlinedButton(
-                                onClick = { viewModel.pauseBatchTranslationQueue() },
-                                modifier = Modifier.testTag("batch_pause_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Pause,
-                                    contentDescription = "Pause Queue",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Pause Queue")
-                            }
-                        }
-
-                        if (batchState.isPaused && !batchState.isRunning) {
-                            Button(
-                                onClick = { viewModel.resumeBatchTranslationQueue() },
-                                modifier = Modifier.testTag("batch_resume_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = "Resume Queue",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Resume Queue")
-                            }
-                        }
-
-                        if (batchState.isRunning || batchState.isPaused) {
-                            OutlinedButton(
-                                onClick = { viewModel.cancelBatchTranslationQueue() },
-                                modifier = Modifier.testTag("batch_cancel_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Cancel,
-                                    contentDescription = "Cancel Batch",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Cancel Batch")
-                            }
-                        }
-
-                        if (!batchState.isRunning && (batchState.needsAttentionCount > 0 || batchState.failedCount > 0)) {
-                            OutlinedButton(
-                                onClick = { viewModel.retryFailedBatchJobs() },
-                                modifier = Modifier.testTag("batch_retry_failed_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Replay,
-                                    contentDescription = "Retry Failed Jobs",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Retry Failed Jobs")
-                            }
-                        }
-
-                        if (!batchState.isRunning && batchState.completedCount > 0) {
-                            TextButton(
-                                onClick = { viewModel.clearCompletedBatchJobs() },
-                                modifier = Modifier.testTag("batch_clear_completed_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CleaningServices,
-                                    contentDescription = "Clear Completed Jobs",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Clear Completed Jobs")
-                            }
-                        }
-                    }
                 }
             }
         }
 
-        // 6. Queue Items Header
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Daftar Urutan Antrean (${sortedJobs.size} File)",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Diproses berurutan 1 per 1",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        if (sortedJobs.isEmpty()) {
-            item {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("batch_empty_queue_placeholder")
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "Antrean Batch Masih Kosong",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "Pilih beberapa file subtitle (.srt, .vtt, .ass, .ssa) atau klik 'Muat 4 File Sampel Episode' untuk melihat cara kerja antrean berurutan.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        } else {
-            itemsIndexed(
-                items = sortedJobs,
-                key = { _, job -> job.jobId }
-            ) { index, job ->
-                val isErrorExpanded = expandedErrorJobIds[job.jobId] == true
-                BatchQueueJobItemCard(
-                    index = index,
-                    totalJobs = sortedJobs.size,
-                    job = job,
-                    isQueueRunning = batchState.isRunning,
-                    isErrorExpanded = isErrorExpanded,
-                    onToggleErrorDetails = {
-                        expandedErrorJobIds[job.jobId] = !isErrorExpanded
-                    },
-                    onMoveUp = { viewModel.moveBatchJobUp(job.jobId) },
-                    onMoveDown = { viewModel.moveBatchJobDown(job.jobId) },
-                    onRemove = { viewModel.removeBatchJob(job.jobId) }
-                )
-            }
-        }
+        // 5. Sticky Bottom Primary Action Bar matching Panel 3 ([ ⏸ Jeda Batch ] [ ⏹ ])
+        BatchBottomActionRow(
+            batchState = batchState,
+            isDark = isDark,
+            viewModel = viewModel
+        )
     }
 
     if (showOutputFolderInspectorDialog) {
@@ -777,33 +680,154 @@ fun BatchQueueTabScreen(
 }
 
 @Composable
-private fun SummaryMetricChip(
-    label: String,
+private fun BatchStatColumn(
     value: String,
+    label: String,
+    badgeBg: Color,
+    valueColor: Color,
     testTagId: String
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier.testTag(testTagId)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = badgeBg
         ) {
             Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
                 text = value,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = valueColor,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
             )
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun BatchBottomActionRow(
+    batchState: BatchQueueState,
+    isDark: Boolean,
+    viewModel: SubtitleViewModel
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Optional secondary row when failed or completed items exist
+        if (!batchState.isRunning && (batchState.needsAttentionCount > 0 || batchState.failedCount > 0 || batchState.completedCount > 0)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (batchState.needsAttentionCount > 0 || batchState.failedCount > 0) {
+                    OutlinedButton(
+                        onClick = { viewModel.retryFailedBatchJobs() },
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("batch_retry_failed_button")
+                    ) {
+                        Icon(Icons.Default.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Retry Gagal")
+                    }
+                }
+                if (batchState.completedCount > 0) {
+                    TextButton(
+                        onClick = { viewModel.clearCompletedBatchJobs() },
+                        modifier = Modifier.testTag("batch_clear_completed_button")
+                    ) {
+                        Icon(Icons.Default.CleaningServices, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Bersihkan Selesai")
+                    }
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val primaryContainerColor = if (isDark) MaterialTheme.colorScheme.primary else ForestGreenPrimary
+            val primaryContentColor = if (isDark) MaterialTheme.colorScheme.onPrimary else Color.White
+
+            if (batchState.isRunning) {
+                Button(
+                    onClick = { viewModel.pauseBatchTranslationQueue() },
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = primaryContainerColor,
+                        contentColor = primaryContentColor
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .testTag("batch_pause_button")
+                ) {
+                    Icon(Icons.Default.Pause, contentDescription = "Jeda Batch", modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Jeda Batch", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                }
+            } else if (batchState.isPaused) {
+                Button(
+                    onClick = { viewModel.resumeBatchTranslationQueue() },
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = primaryContainerColor,
+                        contentColor = primaryContentColor
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .testTag("batch_resume_button")
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = "Lanjutkan Batch", modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Lanjutkan Batch", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Button(
+                    onClick = { viewModel.startBatchTranslationQueue() },
+                    enabled = batchState.queuedCount + batchState.retryQueuedCount > 0,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = primaryContainerColor,
+                        contentColor = primaryContentColor
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .testTag("batch_start_button")
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = "Mulai Batch", modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Mulai Batch", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // Square Stop/Cancel Button on the right matching Panel 3
+            OutlinedIconButton(
+                onClick = { viewModel.cancelBatchTranslationQueue() },
+                enabled = batchState.isRunning || batchState.isPaused,
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier
+                    .size(52.dp)
+                    .testTag("batch_cancel_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Stop,
+                    contentDescription = "Hentikan Batch"
+                )
+            }
         }
     }
 }
@@ -820,25 +844,19 @@ private fun BatchQueueJobItemCard(
     onMoveDown: () -> Unit,
     onRemove: () -> Unit
 ) {
-    val statusColor = when (job.status) {
-        BatchJobStatus.COMPLETED -> Color(0xFF1B8755)
-        BatchJobStatus.PROCESSING, BatchJobStatus.VALIDATING -> MaterialTheme.colorScheme.primary
-        BatchJobStatus.RETRY_QUEUED -> Color(0xFFD97706)
-        BatchJobStatus.NEEDS_ATTENTION, BatchJobStatus.FAILED -> MaterialTheme.colorScheme.error
-        BatchJobStatus.CANCELLED -> MaterialTheme.colorScheme.outline
-        BatchJobStatus.QUEUED -> MaterialTheme.colorScheme.secondary
-    }
+    val isActiveProcessing = job.status == BatchJobStatus.PROCESSING || job.status == BatchJobStatus.VALIDATING
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("batch_job_card_${index + 1}"),
+        shape = RoundedCornerShape(18.dp),
         border = BorderStroke(
-            width = if (job.status == BatchJobStatus.PROCESSING || job.status == BatchJobStatus.VALIDATING) 2.dp else 1.dp,
-            color = if (job.status == BatchJobStatus.PROCESSING || job.status == BatchJobStatus.VALIDATING) {
+            width = if (isActiveProcessing) 1.5.dp else 1.dp,
+            color = if (isActiveProcessing) {
                 MaterialTheme.colorScheme.primary
             } else {
-                MaterialTheme.colorScheme.outlineVariant
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)
             }
         ),
         colors = CardDefaults.cardColors(
@@ -846,7 +864,7 @@ private fun BatchQueueJobItemCard(
         )
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
@@ -854,85 +872,134 @@ private fun BatchQueueJobItemCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Left: Document Icon + Bold Filename
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
-                        Text(
-                            text = "#${job.queueOrder}",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-
+                    Icon(
+                        imageVector = Icons.Outlined.Description,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp)
+                    )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "${job.queueOrder}. \"${job.displayTitleWithRetryTag}\" — ${job.status.indonesianLabel}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 2,
+                            text = job.displayTitleWithRetryTag,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.testTag("batch_job_title_${job.fileName}")
                         )
                         Text(
-                            text = "Format: ${job.detectedFormat.name} • ${job.totalCues} entri • Percobaan: ${job.attemptCount}/${job.maxRetries}",
+                            text = "#${job.queueOrder} • ${job.detectedFormat.name} • ${job.totalCues} dialog",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
-                // Status Badge
-                Surface(
-                    color = statusColor.copy(alpha = 0.14f),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, statusColor.copy(alpha = 0.5f)),
+                // Right: Status Indicator matching Panel 3 of Reference Design
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.testTag("batch_job_status_${job.fileName}")
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        val icon = when (job.status) {
-                            BatchJobStatus.COMPLETED -> Icons.Default.CheckCircle
-                            BatchJobStatus.NEEDS_ATTENTION, BatchJobStatus.FAILED -> Icons.Default.ErrorOutline
-                            BatchJobStatus.RETRY_QUEUED -> Icons.Default.Refresh
-                            else -> Icons.Default.WarningAmber
-                        }
-                        if (job.status == BatchJobStatus.COMPLETED ||
-                            job.status == BatchJobStatus.NEEDS_ATTENTION ||
-                            job.status == BatchJobStatus.RETRY_QUEUED
-                        ) {
+                    when (job.status) {
+                        BatchJobStatus.COMPLETED -> {
+                            Text(
+                                text = "Selesai",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF2D6A4F)
+                            )
                             Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                tint = statusColor,
-                                modifier = Modifier.size(14.dp)
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = "Selesai",
+                                tint = Color(0xFF2D6A4F),
+                                modifier = Modifier.size(20.dp)
                             )
                         }
-                        Text(
-                            text = job.status.displayLabel,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = statusColor
-                        )
+
+                        BatchJobStatus.PROCESSING, BatchJobStatus.VALIDATING -> {
+                            Text(
+                                text = "Memproses... ${job.translatedCuesProgress}/${job.totalCues}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = Color(0xFF4F5BD5)
+                            )
+                        }
+
+                        BatchJobStatus.RETRY_QUEUED -> {
+                            Text(
+                                text = "Retry (${job.attemptCount}/${job.maxRetries})",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = RetryAmberOrange
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Retry Queued",
+                                tint = RetryAmberOrange,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        BatchJobStatus.NEEDS_ATTENTION, BatchJobStatus.FAILED -> {
+                            Text(
+                                text = "Perlu Perhatian",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Icon(
+                                imageVector = Icons.Default.ErrorOutline,
+                                contentDescription = "Error",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        BatchJobStatus.CANCELLED -> {
+                            Text(
+                                text = "Dibatalkan",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+
+                        BatchJobStatus.QUEUED -> {
+                            Text(
+                                text = "Menunggu",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
 
-            if (job.outputFileName != null && job.status == BatchJobStatus.COMPLETED) {
-                Text(
-                    text = "Disimpan sebagai: ${job.outputFileName} (${job.outputFilePath ?: ""})",
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = Color(0xFF1B8755)
+            // Inline Linear Progress Bar when processing (matching episode_03.ass in Panel 3!)
+            if (isActiveProcessing) {
+                val cueFrac = if (job.totalCues > 0) {
+                    (job.translatedCuesProgress.toFloat() / job.totalCues.toFloat()).coerceIn(0.05f, 1f)
+                } else {
+                    0.5f
+                }
+                LinearProgressIndicator(
+                    progress = { cueFrac },
+                    color = ForestGreenPrimary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(3.dp))
                 )
             }
 
@@ -940,91 +1007,100 @@ private fun BatchQueueJobItemCard(
                 Text(
                     text = job.lastFailureReason,
                     style = MaterialTheme.typography.bodySmall,
+                    fontSize = 11.5.sp,
                     color = MaterialTheme.colorScheme.error
                 )
             }
 
-            // Reorder, Remove & View Error Details row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    IconButton(
-                        onClick = onMoveUp,
-                        enabled = !isQueueRunning && index > 0,
-                        modifier = Modifier.testTag("batch_move_up_${job.fileName}")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowUpward,
-                            contentDescription = "Pindah ke Atas"
-                        )
+            // Compact Queue Order Controls & View Error Details when idle or when errors exist
+            if (!isQueueRunning || job.attemptHistory.isNotEmpty() || job.lastValidationResult != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        IconButton(
+                            onClick = onMoveUp,
+                            enabled = !isQueueRunning && index > 0,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .testTag("batch_move_up_${job.fileName}")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowUpward,
+                                contentDescription = "Pindah ke Atas",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = onMoveDown,
+                            enabled = !isQueueRunning && index < totalJobs - 1,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .testTag("batch_move_down_${job.fileName}")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowDownward,
+                                contentDescription = "Pindah ke Bawah",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = onRemove,
+                            enabled = !isQueueRunning && !isActiveProcessing,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .testTag("batch_remove_${job.fileName}")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DeleteOutline,
+                                contentDescription = "Hapus dari Antrean",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
-                    IconButton(
-                        onClick = onMoveDown,
-                        enabled = !isQueueRunning && index < totalJobs - 1,
-                        modifier = Modifier.testTag("batch_move_down_${job.fileName}")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowDownward,
-                            contentDescription = "Pindah ke Bawah"
-                        )
-                    }
-                    IconButton(
-                        onClick = onRemove,
-                        enabled = !isQueueRunning &&
-                            job.status != BatchJobStatus.PROCESSING &&
-                            job.status != BatchJobStatus.VALIDATING,
-                        modifier = Modifier.testTag("batch_remove_${job.fileName}")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DeleteOutline,
-                            contentDescription = "Hapus dari Antrean"
-                        )
-                    }
-                }
 
-                if (job.attemptHistory.isNotEmpty() || job.lastValidationResult != null) {
-                    TextButton(
-                        onClick = onToggleErrorDetails,
-                        modifier = Modifier.testTag("batch_view_details_${job.fileName}")
-                    ) {
-                        Text(if (isErrorExpanded) "Hide Details" else "View Error Details")
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(
-                            imageVector = if (isErrorExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
+                    if (job.attemptHistory.isNotEmpty() || job.lastValidationResult != null) {
+                        TextButton(
+                            onClick = onToggleErrorDetails,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.testTag("batch_view_details_${job.fileName}")
+                        ) {
+                            Text(
+                                text = if (isErrorExpanded) "Tutup Detail" else "Detail Validasi",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = if (isErrorExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
                     }
                 }
             }
 
             AnimatedVisibility(visible = isErrorExpanded) {
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
                         modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text(
-                            text = "Riwayat Percobaan & Laporan Validasi Struktur:",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold
-                        )
                         job.lastValidationResult?.let { valRes ->
                             Text(
-                                text = "• Ringkasan Validasi: ${valRes.summaryMessage}",
+                                text = "• ${valRes.summaryMessage}",
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
                         job.attemptHistory.forEach { rec ->
                             Text(
-                                text = "• Attempt #${rec.attemptNumber}: ${if (rec.passed) "PASSED" else "FAILED (${rec.failureType?.label ?: "Error"})"} — ${rec.reason}",
+                                text = "• Percobaan #${rec.attemptNumber}: ${if (rec.passed) "LOLOS" else "GAGAL (${rec.failureType?.label ?: "Error"})"} — ${rec.reason}",
                                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
                             )
                         }

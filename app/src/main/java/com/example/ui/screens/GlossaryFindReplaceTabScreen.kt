@@ -1,8 +1,12 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -13,6 +17,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -27,9 +32,11 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.FindReplace
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,11 +45,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SecondaryTabRow
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
@@ -53,10 +60,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -66,8 +76,8 @@ import com.example.model.ThemeSettings
 import com.example.ui.components.ActionButtonKind
 import com.example.ui.components.ActionButtonSpec
 import com.example.ui.components.ResponsiveActionButtonGrid
-import com.example.ui.components.StatusPillBadge
 import com.example.ui.components.StudioSectionCard
+import com.example.ui.theme.ForestGreenPrimary
 import com.example.ui.theme.subtitleEditorTextStyle
 import com.example.viewmodel.SubtitleUiState
 import com.example.viewmodel.SubtitleViewModel
@@ -82,6 +92,8 @@ fun GlossaryFindReplaceTabScreen(
     isWideScreen: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
     val liveMatches = remember(
         uiState.document,
         uiState.parsedTranslations,
@@ -99,21 +111,21 @@ fun GlossaryFindReplaceTabScreen(
         liveMatches.sumOf { it.matchRanges.size }
     }
 
-    if (isWideScreen) {
-        // Dual-Pane Layout: Left pane for controls, Right pane for virtualized LazyColumn list
-        Column(
-            modifier = modifier
-                .fillMaxSize()
-                .imePadding()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            SubTabSelectorCard(
-                selectedSubTab = uiState.glossarySubTabIndex,
-                enabledGlossaryCount = glossaryRules.count { it.isEnabled },
-                onSelectSubTab = { viewModel.setGlossarySubTab(it) }
-            )
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .imePadding()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Underline Tab Header matching Panel 4 ("Find & Replace" | "Kamus (Glosarium)")
+        SubTabSelectorCard(
+            selectedSubTab = uiState.glossarySubTabIndex,
+            enabledGlossaryCount = glossaryRules.count { it.isEnabled },
+            onSelectSubTab = { viewModel.setGlossarySubTab(it) }
+        )
 
+        if (isWideScreen) {
             Row(
                 modifier = Modifier.fillMaxSize(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -122,7 +134,7 @@ fun GlossaryFindReplaceTabScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
                     if (uiState.glossarySubTabIndex == 0) {
@@ -131,12 +143,13 @@ fun GlossaryFindReplaceTabScreen(
                                 uiState = uiState,
                                 liveMatchesCount = liveMatches.size,
                                 totalOccurrences = totalOccurrences,
+                                isDark = isDark,
                                 viewModel = viewModel
                             )
                         }
                     } else {
                         item(key = "add_glossary_card") {
-                            AddGlossaryRuleCard(viewModel = viewModel)
+                            AddGlossaryRuleCard(isDark = isDark, viewModel = viewModel)
                         }
                         item(key = "apply_glossary_card") {
                             ApplyGlossaryBatchCard(
@@ -156,20 +169,14 @@ fun GlossaryFindReplaceTabScreen(
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
                     if (uiState.glossarySubTabIndex == 0) {
-                        item(key = "matches_header") {
-                            StatusPillBadge(
-                                text = "Pratinjau Dampak Penggantian (${liveMatches.size} Baris Terdampak)",
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                        }
-                        items(
-                            items = liveMatches,
-                            key = { "match_${it.cueId}" }
-                        ) { matchItem ->
-                            FindMatchPreviewItemCard(
-                                matchItem = matchItem,
-                                themeSettings = themeSettings
+                        item(key = "results_container_card") {
+                            FindResultsListCard(
+                                liveMatches = liveMatches,
+                                totalOccurrences = totalOccurrences,
+                                uiState = uiState,
+                                themeSettings = themeSettings,
+                                isDark = isDark,
+                                viewModel = viewModel
                             )
                         }
                     } else {
@@ -185,91 +192,59 @@ fun GlossaryFindReplaceTabScreen(
                     }
                 }
             }
-        }
-    } else {
-        // Single-Column Virtualized LazyColumn Layout
-        LazyColumn(
-            modifier = modifier
-                .fillMaxSize()
-                .imePadding(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            item(key = "subtab_selector") {
-                SubTabSelectorCard(
-                    selectedSubTab = uiState.glossarySubTabIndex,
-                    enabledGlossaryCount = glossaryRules.count { it.isEnabled },
-                    onSelectSubTab = { viewModel.setGlossarySubTab(it) }
-                )
-            }
-
-            if (uiState.glossarySubTabIndex == 0) {
-                item(key = "find_controls_card") {
-                    QuickFindReplaceControlsCard(
-                        uiState = uiState,
-                        liveMatchesCount = liveMatches.size,
-                        totalOccurrences = totalOccurrences,
-                        viewModel = viewModel
-                    )
-                }
-
-                if (liveMatches.isNotEmpty()) {
-                    item(key = "matches_section_title") {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Pratinjau Baris Terdampak",
-                                style = MaterialTheme.typography.titleSmall
-                            )
-                            StatusPillBadge(
-                                text = "${liveMatches.size} Baris • $totalOccurrences Kecocokan",
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                        }
-                    }
-
-                    items(
-                        items = liveMatches,
-                        key = { "match_${it.cueId}" }
-                    ) { matchItem ->
-                        FindMatchPreviewItemCard(
-                            matchItem = matchItem,
-                            themeSettings = themeSettings
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 24.dp)
+            ) {
+                if (uiState.glossarySubTabIndex == 0) {
+                    item(key = "find_controls_card") {
+                        QuickFindReplaceControlsCard(
+                            uiState = uiState,
+                            liveMatchesCount = liveMatches.size,
+                            totalOccurrences = totalOccurrences,
+                            isDark = isDark,
+                            viewModel = viewModel
                         )
                     }
-                }
-            } else {
-                item(key = "add_glossary_card") {
-                    AddGlossaryRuleCard(viewModel = viewModel)
-                }
-                item(key = "apply_glossary_card") {
-                    ApplyGlossaryBatchCard(
-                        uiState = uiState,
-                        totalRules = glossaryRules.size,
-                        viewModel = viewModel
-                    )
-                }
-                items(
-                    items = glossaryRules,
-                    key = { it.id }
-                ) { rule ->
-                    GlossaryRuleItemCard(
-                        rule = rule,
-                        viewModel = viewModel
-                    )
+
+                    item(key = "results_container_card") {
+                        FindResultsListCard(
+                            liveMatches = liveMatches,
+                            totalOccurrences = totalOccurrences,
+                            uiState = uiState,
+                            themeSettings = themeSettings,
+                            isDark = isDark,
+                            viewModel = viewModel
+                        )
+                    }
+                } else {
+                    item(key = "add_glossary_card") {
+                        AddGlossaryRuleCard(isDark = isDark, viewModel = viewModel)
+                    }
+                    item(key = "apply_glossary_card") {
+                        ApplyGlossaryBatchCard(
+                            uiState = uiState,
+                            totalRules = glossaryRules.size,
+                            viewModel = viewModel
+                        )
+                    }
+                    items(
+                        items = glossaryRules,
+                        key = { it.id }
+                    ) { rule ->
+                        GlossaryRuleItemCard(
+                            rule = rule,
+                            viewModel = viewModel
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SubTabSelectorCard(
     selectedSubTab: Int,
@@ -278,33 +253,75 @@ private fun SubTabSelectorCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
     ) {
-        SecondaryTabRow(
-            selectedTabIndex = selectedSubTab,
-            containerColor = MaterialTheme.colorScheme.surface
-        ) {
-            Tab(
-                selected = selectedSubTab == 0,
-                onClick = { onSelectSubTab(0) },
-                text = { Text("Quick Find & Replace") },
-                icon = { Icon(Icons.Default.FindReplace, contentDescription = null) },
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
                 modifier = Modifier
-                    .defaultMinSize(minHeight = 48.dp)
-                    .testTag("subtab_quick_find_replace")
-            )
-            Tab(
-                selected = selectedSubTab == 1,
-                onClick = { onSelectSubTab(1) },
-                text = { Text("Kamus Glosarium ($enabledGlossaryCount)") },
-                icon = { Icon(Icons.Default.Book, contentDescription = null) },
-                modifier = Modifier
-                    .defaultMinSize(minHeight = 48.dp)
-                    .testTag("subtab_glossary_rules")
-            )
+                    .fillMaxWidth()
+                    .padding(top = 12.dp, start = 16.dp, end = 16.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                UnderlineTabButton(
+                    text = "Find & Replace",
+                    selected = selectedSubTab == 0,
+                    onClick = { onSelectSubTab(0) },
+                    testTag = "subtab_quick_find_replace",
+                    modifier = Modifier.weight(1f)
+                )
+                UnderlineTabButton(
+                    text = if (enabledGlossaryCount > 0) {
+                        "Kamus (Glosarium $enabledGlossaryCount)"
+                    } else {
+                        "Kamus (Glosarium)"
+                    },
+                    selected = selectedSubTab == 1,
+                    onClick = { onSelectSubTab(1) },
+                    testTag = "subtab_glossary_rules",
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun UnderlineTabButton(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    testTag: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .testTag(testTag),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            modifier = Modifier.padding(vertical = 8.dp)
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.85f)
+                .height(3.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(
+                    if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
+                )
+        )
     }
 }
 
@@ -314,219 +331,309 @@ private fun QuickFindReplaceControlsCard(
     uiState: SubtitleUiState,
     liveMatchesCount: Int,
     totalOccurrences: Int,
+    isDark: Boolean,
     viewModel: SubtitleViewModel
 ) {
-    StudioSectionCard(
-        title = "Pencarian & Penggantian Instan Pra-Merge",
-        subtitle = "Cari & ganti istilah pada teks terjemahan tanpa merusak tag atau timestamp",
-        icon = Icons.Default.FindReplace,
-        iconTint = MaterialTheme.colorScheme.primary
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
     ) {
-        OutlinedTextField(
-            value = uiState.findQuery,
-            onValueChange = { viewModel.setFindQuery(it) },
-            label = { Text("Cari Teks (Find)") },
-            placeholder = { Text("Contoh: Shibuya Ward atau Onii-chan") },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .testTag("find_query_input")
-        )
-
-        OutlinedTextField(
-            value = uiState.replaceWith,
-            onValueChange = { viewModel.setReplaceWith(it) },
-            label = { Text("Ganti Dengan (Replace With)") },
-            placeholder = { Text("Contoh: Distrik Shibuya atau Kakak") },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("replace_with_input")
-        )
-
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            FilterChip(
-                selected = uiState.findCaseSensitive,
-                onClick = { viewModel.toggleFindCaseSensitive() },
-                label = { Text("Case Sensitive (Aa)") },
-                modifier = Modifier.testTag("filter_case_sensitive_chip")
-            )
-            FilterChip(
-                selected = uiState.findWholeWord,
-                onClick = { viewModel.toggleFindWholeWord() },
-                label = { Text("Whole Word (\\bKata\\b)") },
-                modifier = Modifier.testTag("filter_whole_word_chip")
-            )
-            FilterChip(
-                selected = uiState.findUseRegex,
-                onClick = { viewModel.toggleFindUseRegex() },
-                label = { Text("Gunakan Regex (.*)") },
-                modifier = Modifier.testTag("filter_regex_chip")
-            )
-        }
-
-        if (uiState.document.format.isAssFamily) {
-            val styles = uiState.document.availableStyles
-            val actors = uiState.document.availableActors
-            if (styles.isNotEmpty()) {
-                Text(
-                    text = "Filter Berdasarkan Style .ASS:",
-                    style = MaterialTheme.typography.labelLarge
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
-                        selected = uiState.selectedStyleFilter == "ALL",
-                        onClick = { viewModel.setSelectedStyleFilter("ALL") },
-                        label = { Text("Semua Style") }
+            // Pill Search Input (🔍) matching Panel 4
+            OutlinedTextField(
+                value = uiState.findQuery,
+                onValueChange = { viewModel.setFindQuery(it) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Cari",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    styles.forEach { styleName ->
-                        FilterChip(
-                            selected = uiState.selectedStyleFilter == styleName,
-                            onClick = { viewModel.setSelectedStyleFilter(styleName) },
-                            label = { Text(styleName) },
-                            modifier = Modifier.testTag("style_filter_$styleName")
-                        )
-                    }
-                }
-            }
-
-            if (actors.isNotEmpty()) {
-                Text(
-                    text = "Filter Berdasarkan Karakter / Actor .ASS:",
-                    style = MaterialTheme.typography.labelLarge
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
-                        selected = uiState.selectedActorFilter == "ALL",
-                        onClick = { viewModel.setSelectedActorFilter("ALL") },
-                        label = { Text("Semua Karakter") }
-                    )
-                    actors.forEach { actorName ->
-                        FilterChip(
-                            selected = uiState.selectedActorFilter == actorName,
-                            onClick = { viewModel.setSelectedActorFilter(actorName) },
-                            label = { Text(actorName) },
-                            modifier = Modifier.testTag("actor_filter_$actorName")
-                        )
-                    }
-                }
-            }
-        }
-
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-
-        Surface(
-            color = if (totalOccurrences > 0) {
-                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f)
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant
-            },
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = if (uiState.findQuery.isBlank()) {
-                    "Ketik kata kunci pada kolom Cari Teks untuk melihat pratinjau kecocokan."
-                } else {
-                    "Ditemukan $totalOccurrences kecocokan pada $liveMatchesCount baris dialog"
                 },
-                style = MaterialTheme.typography.labelLarge,
-                color = if (totalOccurrences > 0) {
-                    MaterialTheme.colorScheme.onSecondaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                placeholder = { Text("Cari teks (contoh: Senpai)") },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                ),
                 modifier = Modifier
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                    .testTag("live_match_count_text")
+                    .fillMaxWidth()
+                    .testTag("find_query_input")
             )
-        }
 
-        ResponsiveActionButtonGrid(
-            buttons = listOf(
-                ActionButtonSpec(
-                    label = "Replace All ($totalOccurrences)",
-                    icon = Icons.Default.FindReplace,
-                    testTag = "replace_all_button",
-                    kind = ActionButtonKind.PRIMARY,
-                    enabled = liveMatchesCount > 0,
-                    onClick = { viewModel.replaceAllMatches() }
+            // Pill Replace Input (⇄) matching Panel 4
+            OutlinedTextField(
+                value = uiState.replaceWith,
+                onValueChange = { viewModel.setReplaceWith(it) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.SwapHoriz,
+                        contentDescription = "Ganti Dengan",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                placeholder = { Text("Ganti dengan (contoh: Senpai / Kakak)") },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ),
-                ActionButtonSpec(
-                    label = "Replace Next",
-                    icon = Icons.Default.PlayArrow,
-                    testTag = "replace_next_button",
-                    kind = ActionButtonKind.TONAL,
-                    enabled = liveMatchesCount > 0,
-                    onClick = { viewModel.replaceNextMatch() }
-                ),
-                ActionButtonSpec(
-                    label = "Undo Replace",
-                    icon = Icons.AutoMirrored.Filled.Undo,
-                    testTag = "undo_replace_button",
-                    kind = ActionButtonKind.OUTLINED,
-                    enabled = uiState.undoTranslationsSnapshot != null,
-                    onClick = { viewModel.undoLastReplace() }
-                )
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("replace_with_input")
             )
-        )
+
+            // Toggle Switches Row: Case sensitive + Regex + Whole Word
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Switch(
+                        checked = uiState.findCaseSensitive,
+                        onCheckedChange = { viewModel.toggleFindCaseSensitive() },
+                        modifier = Modifier.testTag("filter_case_sensitive_chip")
+                    )
+                    Text(
+                        text = "Case sensitive",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Switch(
+                        checked = uiState.findUseRegex,
+                        onCheckedChange = { viewModel.toggleFindUseRegex() },
+                        modifier = Modifier.testTag("filter_regex_chip")
+                    )
+                    Text(
+                        text = "Regex",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                FilterChip(
+                    selected = uiState.findWholeWord,
+                    onClick = { viewModel.toggleFindWholeWord() },
+                    label = { Text("Kata Utuh", style = MaterialTheme.typography.labelSmall) },
+                    modifier = Modifier.testTag("filter_whole_word_chip")
+                )
+            }
+
+            // Full-Width Dark Forest Green Pill Button: [ ⇄ Ganti Semua ] matching Panel 4
+            val primaryColor = if (isDark) MaterialTheme.colorScheme.primary else ForestGreenPrimary
+            val onPrimaryColor = if (isDark) MaterialTheme.colorScheme.onPrimary else Color.White
+
+            Button(
+                onClick = { viewModel.replaceAllMatches() },
+                enabled = liveMatchesCount > 0,
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = primaryColor,
+                    contentColor = onPrimaryColor
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp)
+                    .testTag("replace_all_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SwapHoriz,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (totalOccurrences > 0) "Ganti Semua ($totalOccurrences)" else "Ganti Semua",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            if (uiState.undoTranslationsSnapshot != null || liveMatchesCount > 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (liveMatchesCount > 0) {
+                        OutlinedButton(
+                            onClick = { viewModel.replaceNextMatch() },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("replace_next_button")
+                        ) {
+                            Text("Ganti Berikutnya")
+                        }
+                    }
+                    if (uiState.undoTranslationsSnapshot != null) {
+                        OutlinedButton(
+                            onClick = { viewModel.undoLastReplace() },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("undo_replace_button")
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Undo")
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun FindMatchPreviewItemCard(
-    matchItem: FindMatchItem,
-    themeSettings: ThemeSettings
+private fun FindResultsListCard(
+    liveMatches: List<FindMatchItem>,
+    totalOccurrences: Int,
+    uiState: SubtitleUiState,
+    themeSettings: ThemeSettings,
+    isDark: Boolean,
+    viewModel: SubtitleViewModel
 ) {
-    val highlightBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.32f)
-    val highlightFg = MaterialTheme.colorScheme.primary
+    var showStyleActorFilters by rememberSaveable { mutableStateOf(false) }
 
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(
-            width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
-        ),
-        modifier = Modifier.fillMaxWidth()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                StatusPillBadge(text = "Baris #${matchItem.cueId}")
-                val metaBadge = listOfNotNull(
-                    matchItem.style.takeIf { it.isNotBlank() },
-                    matchItem.actor.takeIf { it.isNotBlank() }
-                ).joinToString(" • ")
-                if (metaBadge.isNotEmpty()) {
-                    Text(
-                        text = metaBadge,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                Text(
+                    text = "Hasil (${liveMatches.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.testTag("live_match_count_text")
+                )
+
+                if (uiState.document.format.isAssFamily) {
+                    IconButton(
+                        onClick = { showStyleActorFilters = !showStyleActorFilters },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FilterList,
+                            contentDescription = "Filter Style & Actor"
+                        )
+                    }
                 }
             }
+
+            AnimatedVisibility(visible = showStyleActorFilters && uiState.document.format.isAssFamily) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val styles = uiState.document.availableStyles
+                    if (styles.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilterChip(
+                                selected = uiState.selectedStyleFilter == "ALL",
+                                onClick = { viewModel.setSelectedStyleFilter("ALL") },
+                                label = { Text("Semua Style") }
+                            )
+                            styles.forEach { styleName ->
+                                FilterChip(
+                                    selected = uiState.selectedStyleFilter == styleName,
+                                    onClick = { viewModel.setSelectedStyleFilter(styleName) },
+                                    label = { Text(styleName) },
+                                    modifier = Modifier.testTag("style_filter_$styleName")
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+
+            if (liveMatches.isEmpty()) {
+                Text(
+                    text = if (uiState.findQuery.isBlank()) {
+                        "Ketik kata kunci di atas (mis. nama karakter atau istilah) untuk menyorot hasil pencarian."
+                    } else {
+                        "Tidak ditemukan kecocokan untuk \"${uiState.findQuery}\"."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            } else {
+                liveMatches.forEachIndexed { idx, matchItem ->
+                    FindMatchCompactRow(
+                        matchItem = matchItem,
+                        themeSettings = themeSettings,
+                        isDark = isDark
+                    )
+                    if (idx < liveMatches.lastIndex) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FindMatchCompactRow(
+    matchItem: FindMatchItem,
+    themeSettings: ThemeSettings,
+    isDark: Boolean
+) {
+    // Yellow highlight matching Panel 4 of Reference Design ([12] ... Senpai ...)
+    val highlightBg = if (isDark) Color(0xFF7A6414) else Color(0xFFFFF199)
+    val highlightFg = if (isDark) Color(0xFFFFF8D6) else Color(0xFF1F1A00)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "[${matchItem.cueId}]",
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
             val highlightedCurrent = buildAnnotatedString {
                 val src = matchItem.currentTranslatedText
@@ -544,7 +651,7 @@ private fun FindMatchPreviewItemCard(
                                 fontWeight = FontWeight.Bold
                             )
                         ) {
-                            append(src.substring(range.first, endExclusive))
+                            append(" ${src.substring(range.first, endExclusive)} ")
                         }
                     }
                     cursor = endExclusive
@@ -554,24 +661,30 @@ private fun FindMatchPreviewItemCard(
                 }
             }
 
-            Text(
-                text = highlightedCurrent,
-                style = subtitleEditorTextStyle(themeSettings)
-            )
-
-            Text(
-                text = "→ ${matchItem.previewReplacedText}",
-                style = subtitleEditorTextStyle(themeSettings),
-                color = MaterialTheme.colorScheme.secondary,
-                fontWeight = FontWeight.Medium
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = highlightedCurrent,
+                    style = subtitleEditorTextStyle(themeSettings),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (matchItem.previewReplacedText != matchItem.currentTranslatedText) {
+                    Text(
+                        text = "→ ${matchItem.previewReplacedText}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
         }
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AddGlossaryRuleCard(viewModel: SubtitleViewModel) {
+private fun AddGlossaryRuleCard(
+    isDark: Boolean,
+    viewModel: SubtitleViewModel
+) {
     var newSourceTerm by rememberSaveable { mutableStateOf("") }
     var newTargetTerm by rememberSaveable { mutableStateOf("") }
     var newCaseSensitive by rememberSaveable { mutableStateOf(false) }
@@ -589,7 +702,7 @@ private fun AddGlossaryRuleCard(viewModel: SubtitleViewModel) {
             label = { Text("Istilah Asli / Salah Terjemah") },
             placeholder = { Text("Contoh: Shibuya Ward") },
             singleLine = true,
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(14.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("glossary_source_input")
@@ -600,7 +713,7 @@ private fun AddGlossaryRuleCard(viewModel: SubtitleViewModel) {
             label = { Text("Istilah Baku Tujuan") },
             placeholder = { Text("Contoh: Distrik Shibuya") },
             singleLine = true,
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(14.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("glossary_target_input")
@@ -635,7 +748,11 @@ private fun AddGlossaryRuleCard(viewModel: SubtitleViewModel) {
                 newTargetTerm = ""
             },
             enabled = newSourceTerm.isNotBlank(),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isDark) MaterialTheme.colorScheme.primary else ForestGreenPrimary,
+                contentColor = if (isDark) MaterialTheme.colorScheme.onPrimary else Color.White
+            ),
             modifier = Modifier
                 .fillMaxWidth()
                 .defaultMinSize(minHeight = 48.dp)
@@ -693,11 +810,11 @@ private fun GlossaryRuleItemCard(
     viewModel: SubtitleViewModel
 ) {
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(
             width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
         ),
         modifier = Modifier.fillMaxWidth()
     ) {

@@ -70,8 +70,8 @@ data class GitHubReleaseInfo(
 )
 
 data class AppUpdateUiState(
-    val currentVersionName: String = "1.1.0",
-    val currentVersionCode: Int = 2,
+    val currentVersionName: String = "1.2.0",
+    val currentVersionCode: Int = 3,
     val repoOwner: String = "EkoSaputro14",
     val repoName: String = "subai-extractor-merger",
     val isChecking: Boolean = false,

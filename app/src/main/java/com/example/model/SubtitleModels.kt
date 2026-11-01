@@ -285,9 +285,9 @@ data class GlossaryRule(
 )
 
 enum class ThemeMode(val label: String) {
-    DARK("Gelap (Default)"),
+    SYSTEM("Sistem"),
     LIGHT("Terang"),
-    SYSTEM("Ikuti Sistem")
+    DARK("Gelap")
 }
 
 enum class ColorPreset(
@@ -296,23 +296,17 @@ enum class ColorPreset(
     val darkPrimary: Color,
     val lightPrimary: Color,
     val darkSecondary: Color,
-    val lightSecondary: Color
+    val lightSecondary: Color,
+    val swatchColor: Color
 ) {
-    OCEAN_BLUE(
-        presetName = "Ocean Blue",
-        subtitleDesc = "Bersih, teknis, kontras tinggi untuk kode .ass",
-        darkPrimary = Color(0xFF8AB4F8),
-        lightPrimary = Color(0xFF1A73E8),
-        darkSecondary = Color(0xFF81C995),
-        lightSecondary = Color(0xFF1E8E3E)
-    ),
     EMERALD_ANIME(
-        presetName = "Emerald Anime",
-        subtitleDesc = "Segar, nyaman untuk pemeriksaan baris panjang",
-        darkPrimary = Color(0xFF6DD58C),
-        lightPrimary = Color(0xFF137333),
-        darkSecondary = Color(0xFF78D9EC),
-        lightSecondary = Color(0xFF007B83)
+        presetName = "Forest Sage",
+        subtitleDesc = "Hijau hutan & sage lembut khas SubAI Studio",
+        darkPrimary = Color(0xFF74C69D),
+        lightPrimary = Color(0xFF1B4332),
+        darkSecondary = Color(0xFF95D5B2),
+        lightSecondary = Color(0xFF2D6A4F),
+        swatchColor = Color(0xFF2D6A4F)
     ),
     VIOLET_STUDIO(
         presetName = "Violet Studio",
@@ -320,40 +314,52 @@ enum class ColorPreset(
         darkPrimary = Color(0xFFD0BCFF),
         lightPrimary = Color(0xFF6750A4),
         darkSecondary = Color(0xFFCCC2DC),
-        lightSecondary = Color(0xFF625B71)
+        lightSecondary = Color(0xFF625B71),
+        swatchColor = Color(0xFF8E7CC3)
+    ),
+    CRIMSON_ROSE(
+        presetName = "Sakura Rose",
+        subtitleDesc = "Lembut & tegas, memudahkan penandaan baris",
+        darkPrimary = Color(0xFFFFB2B7),
+        lightPrimary = Color(0xFFB3261E),
+        darkSecondary = Color(0xFFF2B8B5),
+        lightSecondary = Color(0xFF8C1D18),
+        swatchColor = Color(0xFFF4979C)
+    ),
+    OCEAN_BLUE(
+        presetName = "Ocean Blue",
+        subtitleDesc = "Bersih, teknis, kontras tinggi untuk kode .ass",
+        darkPrimary = Color(0xFF8AB4F8),
+        lightPrimary = Color(0xFF1A73E8),
+        darkSecondary = Color(0xFF81C995),
+        lightSecondary = Color(0xFF1E8E3E),
+        swatchColor = Color(0xFF5FA8D3)
     ),
     AMBER_CINEMA(
-        presetName = "Amber Cinema",
+        presetName = "Amber Gold",
         subtitleDesc = "Hangat, terinspirasi warna subtitle klasik bioskop",
         darkPrimary = Color(0xFFFFB951),
         lightPrimary = Color(0xFFB26A00),
         darkSecondary = Color(0xFFFFDDB3),
-        lightSecondary = Color(0xFF825500)
-    ),
-    CRIMSON_ROSE(
-        presetName = "Crimson Rose",
-        subtitleDesc = "Tegas, memudahkan penandaan baris yang terlewat",
-        darkPrimary = Color(0xFFFFB2B7),
-        lightPrimary = Color(0xFFC5221F),
-        darkSecondary = Color(0xFFF2B8B5),
-        lightSecondary = Color(0xFF8C1D18)
+        lightSecondary = Color(0xFF825500),
+        swatchColor = Color(0xFFF3C663)
     )
 }
 
-enum class EditorFontSizeOption(val label: String, val sizeSp: Int) {
-    SMALL("Kecil (11sp)", 11),
-    MEDIUM("Sedang (13sp)", 13),
-    LARGE("Besar (15sp)", 15),
-    EXTRA_LARGE("Ekstra Besar (17sp)", 17)
+enum class EditorFontSizeOption(val label: String, val shortLabel: String, val sizeSp: Int) {
+    SMALL("Kecil (12sp)", "12", 12),
+    MEDIUM("Sedang (14sp)", "14", 14),
+    LARGE("Besar (16sp)", "16", 16),
+    EXTRA_LARGE("Ekstra (18sp)", "18", 18)
 }
 
 data class ThemeSettings(
-    val themeMode: ThemeMode = ThemeMode.DARK,
-    val colorPreset: ColorPreset = ColorPreset.OCEAN_BLUE,
+    val themeMode: ThemeMode = ThemeMode.LIGHT,
+    val colorPreset: ColorPreset = ColorPreset.EMERALD_ANIME,
     val useDynamicColor: Boolean = false,
     val pureBlackAmoled: Boolean = false,
-    val editorFontSizeSp: Int = 13,
-    val useMonospaceFont: Boolean = true
+    val editorFontSizeSp: Int = 16,
+    val useMonospaceFont: Boolean = false
 )
 
 data class FindMatchItem(

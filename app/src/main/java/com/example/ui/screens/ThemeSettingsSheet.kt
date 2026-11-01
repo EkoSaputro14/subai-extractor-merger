@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,24 +24,34 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.NewReleases
-import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SettingsSuggest
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -49,22 +61,31 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.AppUpdateUiState
 import com.example.model.ColorPreset
-import com.example.model.EditorFontSizeOption
 import com.example.model.ThemeMode
 import com.example.model.ThemeSettings
+import com.example.ui.components.OpenAiDirectTranslateCard
+import com.example.ui.theme.ForestGreenPrimary
+import com.example.ui.theme.SageHighlightFill
 import com.example.viewmodel.SubtitleViewModel
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ThemeSettingsSheet(
     themeSettings: ThemeSettings,
@@ -73,229 +94,480 @@ fun ThemeSettingsSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val appUpdateState by viewModel.appUpdateState.collectAsStateWithLifecycle()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val aiSettings by viewModel.aiSettings.collectAsStateWithLifecycle()
+    val glossaryRules by viewModel.glossaryRules.collectAsStateWithLifecycle()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface
+        containerColor = MaterialTheme.colorScheme.background
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Palette,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Pengaturan Aplikasi, Tema & Pembaruan",
-                    style = MaterialTheme.typography.titleLarge
+        SettingsScreenContent(
+            themeSettings = themeSettings,
+            appUpdateState = appUpdateState,
+            viewModel = viewModel,
+            onBack = onDismiss,
+            aiProviderSection = {
+                OpenAiDirectTranslateCard(
+                    uiState = uiState,
+                    aiSettings = aiSettings,
+                    glossaryRules = glossaryRules,
+                    themeSettings = themeSettings,
+                    viewModel = viewModel
                 )
             }
+        )
+    }
+}
 
-            // 0. Kartu Badge Versi Asli & Cek Versi Terbaru (GitHub Release)
-            AppVersionAndUpdateSection(
-                updateState = appUpdateState,
-                onCheckUpdate = { viewModel.checkAppUpdate() },
-                onDownloadLatestApk = { viewModel.downloadLatestUpdateApk() },
-                onOpenReleasePage = { viewModel.openLatestReleaseInBrowser() }
-            )
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun SettingsScreenContent(
+    themeSettings: ThemeSettings,
+    appUpdateState: AppUpdateUiState,
+    viewModel: SubtitleViewModel,
+    onBack: () -> Unit,
+    aiProviderSection: @Composable () -> Unit
+) {
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    // 0 = Umum/Semua, 1 = AI Provider, 2 = Tema, 3 = Editor, 4 = Pembaruan
+    var selectedCategory by rememberSaveable { mutableIntStateOf(0) }
 
-            HorizontalDivider()
-
-            // 1. Mode Pencahayaan
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // Top Header: [ ← ] Pengaturan (matching Panel 6 of Reference Design)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Kembali"
+                )
+            }
+            Spacer(modifier = Modifier.width(4.dp))
             Text(
-                text = "Mode Pencahayaan (Theme Mode):",
-                style = MaterialTheme.typography.titleSmall
+                text = "Pengaturan",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
             )
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+        }
+
+        // Two-Column Layout matching Panel 6: Left Category Rail + Right Content Pane
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            // Left Category Column
+            Column(
+                modifier = Modifier.width(114.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                ThemeMode.entries.forEach { mode ->
-                    FilterChip(
-                        selected = themeSettings.themeMode == mode,
-                        onClick = { viewModel.updateThemeMode(mode) },
-                        label = { Text(mode.label) },
-                        modifier = Modifier.testTag("theme_mode_${mode.name.lowercase()}")
-                    )
-                }
-            }
-
-            // AMOLED Pure Black
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "AMOLED Pure Black (#000000)",
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    Text(
-                        text = "Latar utama hitam pekat saat Mode Gelap aktif untuk kenyamanan mata.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = themeSettings.pureBlackAmoled,
-                    onCheckedChange = { viewModel.updatePureBlackAmoled(it) },
-                    modifier = Modifier.testTag("amoled_pure_black_switch")
+                SettingsCategoryPill(
+                    icon = Icons.Outlined.Settings,
+                    label = "Umum",
+                    selected = selectedCategory == 0,
+                    isDark = isDark,
+                    onClick = { selectedCategory = 0 }
+                )
+                SettingsCategoryPill(
+                    icon = Icons.Outlined.Cloud,
+                    label = "AI Provider",
+                    selected = selectedCategory == 1,
+                    isDark = isDark,
+                    onClick = { selectedCategory = 1 }
+                )
+                SettingsCategoryPill(
+                    icon = Icons.Outlined.Palette,
+                    label = "Tema",
+                    selected = selectedCategory == 2,
+                    isDark = isDark,
+                    onClick = { selectedCategory = 2 }
+                )
+                SettingsCategoryPill(
+                    icon = Icons.Outlined.Edit,
+                    label = "Editor",
+                    selected = selectedCategory == 3,
+                    isDark = isDark,
+                    onClick = { selectedCategory = 3 }
+                )
+                SettingsCategoryPill(
+                    icon = Icons.Outlined.Inventory2,
+                    label = "Pembaruan",
+                    selected = selectedCategory == 4,
+                    isDark = isDark,
+                    onClick = { selectedCategory = 4 }
                 )
             }
 
-            // Material You Dynamic Color (Android 12+)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Material You Dynamic Color",
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Text(
-                            text = "Gunakan skema warna otomatis dari wallpaper perangkat Android 12+.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = themeSettings.useDynamicColor,
-                        onCheckedChange = { viewModel.updateUseDynamicColor(it) },
-                        modifier = Modifier.testTag("dynamic_color_switch")
-                    )
-                }
-            }
-
-            HorizontalDivider()
-
-            // 2. 5 Preset Palet Warna Bawaan
-            Text(
-                text = "Pilihan Palet Aksen Warna (5 Preset Studio):",
-                style = MaterialTheme.typography.titleSmall
-            )
-
-            ColorPreset.entries.forEach { preset ->
-                val isSelected = !themeSettings.useDynamicColor && themeSettings.colorPreset == preset
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (isSelected) {
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                    } else {
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                    },
+            // Right Detail Pane Card
+            Card(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                ),
+                border = BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                )
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { viewModel.updateColorPreset(preset) }
-                        .testTag("color_preset_${preset.name.lowercase()}")
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            // Dual swatch preview (Primary + Secondary)
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Box(
+                    if (selectedCategory == 1) {
+                        // AI Provider Section
+                        aiProviderSection()
+                    } else {
+                        // 1. Tema Tampilan (Sistem, Terang, Gelap) matching Panel 6
+                        if (selectedCategory == 0 || selectedCategory == 2) {
+                            Text(
+                                text = "Tema Tampilan",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                ThemeModeCardOption(
+                                    mode = ThemeMode.SYSTEM,
+                                    icon = Icons.Outlined.SettingsSuggest,
+                                    isSelected = themeSettings.themeMode == ThemeMode.SYSTEM,
+                                    isDark = isDark,
+                                    onClick = { viewModel.updateThemeMode(ThemeMode.SYSTEM) },
                                     modifier = Modifier
-                                        .size(22.dp)
-                                        .clip(CircleShape)
-                                        .background(preset.darkPrimary)
-                                        .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                                        .weight(1f)
+                                        .testTag("theme_mode_system")
                                 )
-                                Box(
+                                ThemeModeCardOption(
+                                    mode = ThemeMode.LIGHT,
+                                    icon = Icons.Outlined.LightMode,
+                                    isSelected = themeSettings.themeMode == ThemeMode.LIGHT,
+                                    isDark = isDark,
+                                    onClick = { viewModel.updateThemeMode(ThemeMode.LIGHT) },
                                     modifier = Modifier
-                                        .size(22.dp)
-                                        .clip(CircleShape)
-                                        .background(preset.darkSecondary)
-                                        .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                                        .weight(1f)
+                                        .testTag("theme_mode_light")
+                                )
+                                ThemeModeCardOption(
+                                    mode = ThemeMode.DARK,
+                                    icon = Icons.Outlined.DarkMode,
+                                    isSelected = themeSettings.themeMode == ThemeMode.DARK,
+                                    isDark = isDark,
+                                    onClick = { viewModel.updateThemeMode(ThemeMode.DARK) },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("theme_mode_dark")
                                 )
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = preset.presetName,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = preset.subtitleDesc,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+
+                            // 2. Palet Warna (5 Circular Swatches with Checkmark) matching Panel 6
+                            Text(
+                                text = "Palet Warna",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                ColorPreset.entries.forEach { preset ->
+                                    val isSelected = !themeSettings.useDynamicColor && themeSettings.colorPreset == preset
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(CircleShape)
+                                            .background(preset.swatchColor)
+                                            .border(
+                                                width = if (isSelected) 2.5.dp else 1.dp,
+                                                color = if (isSelected) {
+                                                    MaterialTheme.colorScheme.onSurface
+                                                } else {
+                                                    Color.Black.copy(alpha = 0.12f)
+                                                },
+                                                shape = CircleShape
+                                            )
+                                            .clickable { viewModel.updateColorPreset(preset) }
+                                            .testTag("color_preset_${preset.name.lowercase()}")
+                                    ) {
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = preset.presetName,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (selectedCategory == 2) {
+                                // Extra AMOLED & Dynamic Color toggles when in dedicated Tema tab
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "AMOLED Pure Black",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    Switch(
+                                        checked = themeSettings.pureBlackAmoled,
+                                        onCheckedChange = { viewModel.updatePureBlackAmoled(it) },
+                                        modifier = Modifier.testTag("amoled_pure_black_switch")
+                                    )
+                                }
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Material You Dynamic",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                        Switch(
+                                            checked = themeSettings.useDynamicColor,
+                                            onCheckedChange = { viewModel.updateUseDynamicColor(it) },
+                                            modifier = Modifier.testTag("dynamic_color_switch")
+                                        )
+                                    }
+                                }
                             }
                         }
 
-                        if (isSelected) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "Dipilih",
-                                tint = MaterialTheme.colorScheme.primary
+                        // 3. Ukuran Font Segmented Bar [ A | 14 | 16 | 18 | A ] matching Panel 6
+                        if (selectedCategory == 0 || selectedCategory == 3) {
+                            Text(
+                                text = "Ukuran Font",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "A",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { viewModel.updateEditorFontSizeSp(12) }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                                            .testTag("font_size_12")
+                                    )
+
+                                    listOf(14, 16, 18).forEach { sizeSp ->
+                                        val isSizeSelected = themeSettings.editorFontSizeSp == sizeSp
+                                        val pillBg = if (isSizeSelected) {
+                                            if (isDark) Color(0xFF214431) else SageHighlightFill
+                                        } else {
+                                            Color.Transparent
+                                        }
+                                        val pillFg = if (isSizeSelected) {
+                                            if (isDark) Color(0xFF8CE0AF) else ForestGreenPrimary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        }
+
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = pillBg,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .clickable { viewModel.updateEditorFontSizeSp(sizeSp) }
+                                                .testTag("font_size_$sizeSp")
+                                        ) {
+                                            Text(
+                                                text = "$sizeSp",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = if (isSizeSelected) FontWeight.Bold else FontWeight.Medium,
+                                                color = pillFg,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Text(
+                                        text = "A",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { viewModel.updateEditorFontSizeSp(18) }
+                                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+
+                            if (selectedCategory == 3) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilterChip(
+                                        selected = themeSettings.useMonospaceFont,
+                                        onClick = { viewModel.updateUseMonospaceFont(true) },
+                                        label = { Text("Monospace") },
+                                        modifier = Modifier.testTag("font_family_monospace")
+                                    )
+                                    FilterChip(
+                                        selected = !themeSettings.useMonospaceFont,
+                                        onClick = { viewModel.updateUseMonospaceFont(false) },
+                                        label = { Text("Sans-Serif") },
+                                        modifier = Modifier.testTag("font_family_sans")
+                                    )
+                                }
+                            }
+                        }
+
+                        // 4. Cek Pembaruan Card matching Panel 6 (v1.2.0 Build 3 + Live GitHub Release Check & Download)
+                        if (selectedCategory == 0 || selectedCategory == 4) {
+                            AppVersionAndUpdateSection(
+                                updateState = appUpdateState,
+                                isDark = isDark,
+                                onCheckUpdate = { viewModel.checkAppUpdate() },
+                                onDownloadLatestApk = { viewModel.downloadLatestUpdateApk() },
+                                onOpenReleasePage = { viewModel.openLatestReleaseInBrowser() }
                             )
                         }
                     }
                 }
             }
+        }
+    }
+}
 
-            HorizontalDivider()
+@Composable
+private fun SettingsCategoryPill(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    isDark: Boolean,
+    onClick: () -> Unit
+) {
+    val bg = if (selected) {
+        if (isDark) Color(0xFF214431) else SageHighlightFill
+    } else {
+        Color.Transparent
+    }
+    val fg = if (selected) {
+        if (isDark) Color(0xFF8CE0AF) else ForestGreenPrimary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
 
-            // 3. Kustomisasi Tipografi Editor Subtitle
-            Text(
-                text = "Ukuran Font Teks Ekstraksi & Editor Merge:",
-                style = MaterialTheme.typography.titleSmall
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = bg,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = fg,
+                modifier = Modifier.size(18.dp)
             )
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                EditorFontSizeOption.entries.forEach { sizeOption ->
-                    FilterChip(
-                        selected = themeSettings.editorFontSizeSp == sizeOption.sizeSp,
-                        onClick = { viewModel.updateEditorFontSizeSp(sizeOption.sizeSp) },
-                        label = { Text(sizeOption.label) },
-                        modifier = Modifier.testTag("font_size_${sizeOption.sizeSp}")
-                    )
-                }
-            }
-
             Text(
-                text = "Jenis Huruf Pratinjau Editor:",
-                style = MaterialTheme.typography.titleSmall
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                color = fg,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = themeSettings.useMonospaceFont,
-                    onClick = { viewModel.updateUseMonospaceFont(true) },
-                    label = { Text("Monospace (Kode & Tag .ASS)") },
-                    modifier = Modifier.testTag("font_family_monospace")
-                )
-                FilterChip(
-                    selected = !themeSettings.useMonospaceFont,
-                    onClick = { viewModel.updateUseMonospaceFont(false) },
-                    label = { Text("Sans-Serif (Dialog Alami)") },
-                    modifier = Modifier.testTag("font_family_sans")
-                )
-            }
+        }
+    }
+}
 
-            Spacer(modifier = Modifier.height(18.dp))
+@Composable
+private fun ThemeModeCardOption(
+    mode: ThemeMode,
+    icon: ImageVector,
+    isSelected: Boolean,
+    isDark: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val containerColor = if (isSelected) {
+        if (isDark) Color(0xFF28593E) else Color(0xFF2D6A4F)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val contentColor = if (isSelected) {
+        Color.White
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = containerColor,
+        border = if (!isSelected) {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        } else null,
+        modifier = modifier
+            .heightIn(min = 66.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 10.dp, horizontal = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = mode.label,
+                tint = contentColor,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = mode.label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = contentColor,
+                maxLines = 1
+            )
         }
     }
 }
@@ -304,18 +576,18 @@ fun ThemeSettingsSheet(
 @Composable
 private fun AppVersionAndUpdateSection(
     updateState: AppUpdateUiState,
+    isDark: Boolean,
     onCheckUpdate: () -> Unit,
     onDownloadLatestApk: () -> Unit,
     onOpenReleasePage: () -> Unit
 ) {
-    ElevatedCard(
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("app_version_update_card"),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-        )
+            .testTag("app_version_update_card")
     ) {
         Column(
             modifier = Modifier
@@ -323,48 +595,39 @@ private fun AppVersionAndUpdateSection(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // Top Row matching Panel 6: "Cek Pembaruan" & "v1.2.0 (Build 3)" + ">"
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !updateState.isChecking, onClick = onCheckUpdate),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.SystemUpdate,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Cek Pembaruan",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            text = "Versi Aplikasi & Pembaruan",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "${updateState.repoOwner}/${updateState.repoName}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-
-                // Badge Versi Asli Aplikasi
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.testTag("settings_version_badge")
-                ) {
                     Text(
                         text = "v${updateState.currentVersionName} (Build ${updateState.currentVersionCode})",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("settings_version_badge")
+                    )
+                }
+
+                if (updateState.isChecking) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Cek Versi Terbaru",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -377,41 +640,38 @@ private fun AppVersionAndUpdateSection(
                 FilledTonalButton(
                     onClick = onCheckUpdate,
                     enabled = !updateState.isChecking,
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.testTag("check_app_update_button")
                 ) {
-                    if (updateState.isChecking) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(if (updateState.isChecking) "Memeriksa..." else "Cek Versi Terbaru")
+                    Text(
+                        text = if (updateState.isChecking) "Memeriksa..." else "Cek Versi Terbaru",
+                        style = MaterialTheme.typography.labelMedium
+                    )
                 }
 
                 OutlinedButton(
                     onClick = onOpenReleasePage,
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.testTag("open_github_release_button")
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.OpenInNew,
                         contentDescription = null,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("GitHub Releases")
+                    Text("GitHub Release", style = MaterialTheme.typography.labelMedium)
                 }
             }
 
-            // Status / Error Banner
+            // Error Message Banner
             AnimatedVisibility(visible = !updateState.errorMessage.isNullOrBlank()) {
-                val errText = updateState.errorMessage.orEmpty()
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.75f),
@@ -425,11 +685,11 @@ private fun AppVersionAndUpdateSection(
                             imageVector = Icons.Default.ErrorOutline,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onErrorContainer,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = errText,
+                            text = updateState.errorMessage.orEmpty(),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
@@ -457,9 +717,9 @@ private fun AppVersionAndUpdateSection(
                                     imageVector = Icons.Default.CheckCircle,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = updateState.statusMessage
                                         ?: "Sudah menggunakan versi terbaru (v${updateState.currentVersionName})",
@@ -485,7 +745,7 @@ private fun AppVersionAndUpdateSection(
                 if (latest != null) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("update_available_card")
@@ -494,38 +754,25 @@ private fun AppVersionAndUpdateSection(
                             modifier = Modifier.padding(12.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.NewReleases,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Pembaruan Tersedia: v${latest.versionName}",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                }
-                                if (latest.publishedAt.isNotBlank()) {
-                                    Text(
-                                        text = latest.publishedAt,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                                    )
-                                }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.NewReleases,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Pembaruan Tersedia: v${latest.versionName}",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
                             }
 
                             if (latest.releaseNotes.isNotBlank()) {
                                 Text(
-                                    text = latest.releaseNotes.take(360),
+                                    text = latest.releaseNotes.take(320),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
@@ -534,6 +781,11 @@ private fun AppVersionAndUpdateSection(
                             Button(
                                 onClick = onDownloadLatestApk,
                                 enabled = !updateState.isDownloadingApk,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isDark) MaterialTheme.colorScheme.primary else ForestGreenPrimary,
+                                    contentColor = if (isDark) MaterialTheme.colorScheme.onPrimary else Color.White
+                                ),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .testTag("download_update_apk_button")
@@ -553,7 +805,7 @@ private fun AppVersionAndUpdateSection(
                 }
             }
 
-            // Status unduhan berlangsung / selesai di DownloadManager
+            // Status unduhan di DownloadManager
             AnimatedVisibility(visible = !updateState.statusMessage.isNullOrBlank() && updateState.lastDownloadId != null) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),

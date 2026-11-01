@@ -7,6 +7,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -15,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -22,19 +26,26 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FindReplace
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MergeType
-import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.QueuePlayNext
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material.icons.outlined.FindReplace
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.MergeType
 import androidx.compose.material.icons.outlined.QueuePlayNext
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,15 +55,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -64,7 +74,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -76,9 +91,13 @@ import com.example.model.ThemeSettings
 import com.example.ui.screens.BatchQueueTabScreen
 import com.example.ui.screens.ExtractTabScreen
 import com.example.ui.screens.GlossaryFindReplaceTabScreen
+import com.example.ui.screens.HomeDashboardScreen
 import com.example.ui.screens.MergeTabScreen
 import com.example.ui.screens.PasteTabScreen
+import com.example.ui.screens.SubAiParallelogramLogo
 import com.example.ui.screens.ThemeSettingsSheet
+import com.example.ui.theme.ForestGreenDark
+import com.example.ui.theme.SageHighlightFill
 import com.example.ui.theme.SubAiExtractorTheme
 import com.example.viewmodel.SubtitleUiState
 import com.example.viewmodel.SubtitleViewModel
@@ -87,7 +106,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val initialTab = intent?.getIntExtra("open_tab", 0) ?: 0
+        // Default to -1 (Beranda / Home Dashboard) unless a specific tab is requested via Intent
+        val initialTab = if (intent?.hasExtra("open_tab") == true) {
+            intent.getIntExtra("open_tab", -1)
+        } else {
+            -1
+        }
         setContent {
             val subtitleViewModel: SubtitleViewModel = viewModel()
             val themeSettings by subtitleViewModel.themeSettings.collectAsStateWithLifecycle()
@@ -106,7 +130,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun SubAiExtractorMainScreen(
     viewModel: SubtitleViewModel,
-    initialTab: Int = 0
+    initialTab: Int = -1
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val aiSettings by viewModel.aiSettings.collectAsStateWithLifecycle()
@@ -114,13 +138,15 @@ fun SubAiExtractorMainScreen(
     val themeSettings by viewModel.themeSettings.collectAsStateWithLifecycle()
     val batchState by viewModel.batchQueueState.collectAsStateWithLifecycle()
 
-    var selectedTab by rememberSaveable { mutableIntStateOf(initialTab.coerceIn(0, 4)) }
+    // -1 = Beranda (Home Dashboard), 0 = Ekstrak, 1 = Paste AI, 2 = Find & Kamus, 3 = Merge, 4 = Batch
+    var selectedTab by rememberSaveable { mutableIntStateOf(initialTab.coerceIn(-1, 4)) }
     var showThemeSheet by rememberSaveable { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
-    // Return to Tab 0 (Ekstrak) when Back is pressed on secondary tabs
-    BackHandler(enabled = selectedTab != 0) {
-        selectedTab = 0
+    // Return to Beranda (-1) when Back is pressed on secondary tabs
+    BackHandler(enabled = selectedTab != -1) {
+        selectedTab = -1
     }
 
     val openSubtitleLauncher = rememberLauncherForActivityResult(
@@ -165,79 +191,143 @@ fun SubAiExtractorMainScreen(
 
     val enabledRulesCount = glossaryRules.count { it.isEnabled }
 
+    val activeScreenTitle = when (selectedTab) {
+        -1 -> "SubAI Extractor & Merger"
+        0 -> "Ekstrak & Terjemahkan"
+        1 -> "Paste AI"
+        2 -> "Find & Kamus"
+        3 -> "Merge Subtitle"
+        4 -> "Batch Translation"
+        else -> "SubAI Extractor & Merger"
+    }
+
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isWideScreen = maxWidth >= 600.dp
 
         Scaffold(
             modifier = Modifier.fillMaxSize(),
+            containerColor = MaterialTheme.colorScheme.background,
             contentWindowInsets = WindowInsets.safeDrawing,
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
             topBar = {
-                TopAppBar(
-                    windowInsets = WindowInsets.statusBars,
-                    title = {
-                        Column {
-                            Text(
-                                text = "SubAI Extractor & Merger",
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "${uiState.document.fileName} • ${uiState.document.cues.size} dialog (${uiState.matchedCount} cocok)",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.testTag("active_file_subtitle")
-                            )
-                        }
-                    },
-                    actions = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            FilledTonalIconButton(
-                                onClick = {
-                                    openSubtitleLauncher.launch(arrayOf("*/*"))
-                                },
-                                modifier = Modifier
-                                    .minimumInteractiveComponentSize()
-                                    .testTag("topbar_open_file_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.FolderOpen,
-                                    contentDescription = "Buka File Subtitle (.ASS/.SRT/.VTT)",
-                                    modifier = Modifier.size(20.dp)
+                if (!isWideScreen) {
+                    TopAppBar(
+                        windowInsets = WindowInsets.statusBars,
+                        navigationIcon = {
+                            if (selectedTab != -1) {
+                                IconButton(
+                                    onClick = { selectedTab = -1 },
+                                    modifier = Modifier.testTag("topbar_back_to_home_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Kembali ke Beranda"
+                                    )
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier.padding(start = 14.dp, end = 6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    SubAiParallelogramLogo(
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                        },
+                        title = {
+                            Column {
+                                Text(
+                                    text = activeScreenTitle,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${uiState.document.fileName} • ${uiState.document.cues.size} dialog (${uiState.matchedCount} cocok)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.testTag("active_file_subtitle")
                                 )
                             }
-                            Spacer(modifier = Modifier.width(4.dp))
-                            IconButton(
-                                onClick = { showThemeSheet = true },
-                                modifier = Modifier
-                                    .minimumInteractiveComponentSize()
-                                    .testTag("open_theme_settings_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Palette,
-                                    contentDescription = "Pengaturan Tema Warna & Editor",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
+                        },
+                        actions = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                FilledTonalIconButton(
+                                    onClick = {
+                                        openSubtitleLauncher.launch(arrayOf("*/*"))
+                                    },
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("topbar_open_file_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FolderOpen,
+                                        contentDescription = "Buka File Subtitle (.ASS/.SRT/.VTT)",
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                                IconButton(
+                                    onClick = { showThemeSheet = true },
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("open_theme_settings_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Settings,
+                                        contentDescription = "Pengaturan Aplikasi & Tema",
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                             }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.background
+                        )
                     )
-                )
+                }
             },
             bottomBar = {
                 if (!isWideScreen) {
+                    val navItemColors = NavigationBarItemDefaults.colors(
+                        indicatorColor = if (isDark) Color(0xFF214431) else SageHighlightFill,
+                        selectedIconColor = if (isDark) Color(0xFF8CE0AF) else ForestGreenDark,
+                        selectedTextColor = if (isDark) Color(0xFF8CE0AF) else ForestGreenDark
+                    )
+
                     NavigationBar(
                         containerColor = MaterialTheme.colorScheme.surface,
                         windowInsets = WindowInsets.navigationBars
                     ) {
                         NavigationBarItem(
+                            selected = selectedTab == -1,
+                            onClick = { selectedTab = -1 },
+                            colors = navItemColors,
+                            icon = {
+                                Icon(
+                                    imageVector = if (selectedTab == -1) Icons.Filled.Home else Icons.Outlined.Home,
+                                    contentDescription = "Beranda"
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = "Beranda",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
+                            modifier = Modifier.testTag("nav_tab_home")
+                        )
+
+                        NavigationBarItem(
                             selected = selectedTab == 0,
                             onClick = { selectedTab = 0 },
+                            colors = navItemColors,
                             icon = {
                                 Icon(
                                     imageVector = if (selectedTab == 0) Icons.Filled.Description else Icons.Outlined.Description,
@@ -257,6 +347,7 @@ fun SubAiExtractorMainScreen(
                         NavigationBarItem(
                             selected = selectedTab == 1,
                             onClick = { selectedTab = 1 },
+                            colors = navItemColors,
                             icon = {
                                 BadgedBox(
                                     badge = {
@@ -286,6 +377,7 @@ fun SubAiExtractorMainScreen(
                         NavigationBarItem(
                             selected = selectedTab == 2,
                             onClick = { selectedTab = 2 },
+                            colors = navItemColors,
                             icon = {
                                 BadgedBox(
                                     badge = {
@@ -302,7 +394,7 @@ fun SubAiExtractorMainScreen(
                             },
                             label = {
                                 Text(
-                                    text = "Find & Kamus",
+                                    text = "Kamus",
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -313,6 +405,7 @@ fun SubAiExtractorMainScreen(
                         NavigationBarItem(
                             selected = selectedTab == 3,
                             onClick = { selectedTab = 3 },
+                            colors = navItemColors,
                             icon = {
                                 Icon(
                                     imageVector = if (selectedTab == 3) Icons.Filled.MergeType else Icons.Outlined.MergeType,
@@ -332,6 +425,7 @@ fun SubAiExtractorMainScreen(
                         NavigationBarItem(
                             selected = selectedTab == 4,
                             onClick = { selectedTab = 4 },
+                            colors = navItemColors,
                             icon = {
                                 BadgedBox(
                                     badge = {
@@ -362,113 +456,16 @@ fun SubAiExtractorMainScreen(
             }
         ) { innerPadding ->
             if (isWideScreen) {
+                // Wide Screen Layout with Dark Forest Green Navigation Rail (matching Panel 2 of Reference Design!)
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
-                    NavigationRail(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .windowInsetsPadding(WindowInsets.navigationBars)
-                    ) {
-                        NavigationRailItem(
-                            selected = selectedTab == 0,
-                            onClick = { selectedTab = 0 },
-                            icon = {
-                                Icon(
-                                    imageVector = if (selectedTab == 0) Icons.Filled.Description else Icons.Outlined.Description,
-                                    contentDescription = "Tab Ekstrak & Copy"
-                                )
-                            },
-                            label = { Text("Ekstrak") },
-                            modifier = Modifier.testTag("nav_tab_extract")
-                        )
-
-                        NavigationRailItem(
-                            selected = selectedTab == 1,
-                            onClick = { selectedTab = 1 },
-                            icon = {
-                                BadgedBox(
-                                    badge = {
-                                        if (uiState.matchedCount > 0) {
-                                            Badge {
-                                                Text("${uiState.matchedCount}/${uiState.document.cues.size}")
-                                            }
-                                        }
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = if (selectedTab == 1) Icons.Filled.ContentPaste else Icons.Outlined.ContentPaste,
-                                        contentDescription = "Tab Paste AI"
-                                    )
-                                }
-                            },
-                            label = { Text("Paste AI") },
-                            modifier = Modifier.testTag("nav_tab_paste")
-                        )
-
-                        NavigationRailItem(
-                            selected = selectedTab == 2,
-                            onClick = { selectedTab = 2 },
-                            icon = {
-                                BadgedBox(
-                                    badge = {
-                                        if (enabledRulesCount > 0) {
-                                            Badge { Text("$enabledRulesCount") }
-                                        }
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = if (selectedTab == 2) Icons.Filled.FindReplace else Icons.Outlined.FindReplace,
-                                        contentDescription = "Tab Find & Replace dan Glosarium"
-                                    )
-                                }
-                            },
-                            label = { Text("Kamus") },
-                            modifier = Modifier.testTag("nav_tab_glossary")
-                        )
-
-                        NavigationRailItem(
-                            selected = selectedTab == 3,
-                            onClick = { selectedTab = 3 },
-                            icon = {
-                                Icon(
-                                    imageVector = if (selectedTab == 3) Icons.Filled.MergeType else Icons.Outlined.MergeType,
-                                    contentDescription = "Tab Merge & Simpan"
-                                )
-                            },
-                            label = { Text("Merge") },
-                            modifier = Modifier.testTag("nav_tab_merge")
-                        )
-
-                        NavigationRailItem(
-                            selected = selectedTab == 4,
-                            onClick = { selectedTab = 4 },
-                            icon = {
-                                BadgedBox(
-                                    badge = {
-                                        if (batchState.totalFiles > 0) {
-                                            Badge {
-                                                Text("${batchState.completedCount}/${batchState.totalFiles}")
-                                            }
-                                        }
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = if (selectedTab == 4) Icons.Filled.QueuePlayNext else Icons.Outlined.QueuePlayNext,
-                                        contentDescription = "Tab Batch Subtitle Translation Queue"
-                                    )
-                                }
-                            },
-                            label = { Text("Batch") },
-                            modifier = Modifier.testTag("nav_tab_batch")
-                        )
-                    }
-
-                    VerticalDivider(
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                    ForestStudioNavigationRail(
+                        selectedTab = selectedTab,
+                        onSelectTab = { selectedTab = it },
+                        onOpenSettings = { showThemeSheet = true }
                     )
 
                     Box(modifier = Modifier.fillMaxSize()) {
@@ -481,7 +478,9 @@ fun SubAiExtractorMainScreen(
                             themeSettings = themeSettings,
                             batchState = batchState,
                             viewModel = viewModel,
+                            onNavigateToTab = { selectedTab = it },
                             onOpenFilePicker = { openSubtitleLauncher.launch(arrayOf("*/*")) },
+                            onOpenSettings = { showThemeSheet = true },
                             onSaveMergedFile = { suggestedFileName ->
                                 createSubtitleLauncher.launch(suggestedFileName)
                             },
@@ -512,7 +511,9 @@ fun SubAiExtractorMainScreen(
                         themeSettings = themeSettings,
                         batchState = batchState,
                         viewModel = viewModel,
+                        onNavigateToTab = { selectedTab = it },
                         onOpenFilePicker = { openSubtitleLauncher.launch(arrayOf("*/*")) },
+                        onOpenSettings = { showThemeSheet = true },
                         onSaveMergedFile = { suggestedFileName ->
                             createSubtitleLauncher.launch(suggestedFileName)
                         },
@@ -541,6 +542,132 @@ fun SubAiExtractorMainScreen(
 }
 
 @Composable
+private fun ForestStudioNavigationRail(
+    selectedTab: Int,
+    onSelectTab: (Int) -> Unit,
+    onOpenSettings: () -> Unit
+) {
+    Surface(
+        color = ForestGreenDark,
+        shape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(68.dp)
+            .windowInsetsPadding(WindowInsets.navigationBars)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(vertical = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Top Brand Mark (//)
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onSelectTab(-1) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    SubAiParallelogramLogo(
+                        color = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                ForestRailIconItem(
+                    icon = Icons.Outlined.Home,
+                    contentDescription = "Beranda",
+                    selected = selectedTab == -1,
+                    testTag = "nav_tab_home",
+                    onClick = { onSelectTab(-1) }
+                )
+                ForestRailIconItem(
+                    icon = Icons.Outlined.Description,
+                    contentDescription = "Ekstrak & Terjemahkan",
+                    selected = selectedTab == 0,
+                    testTag = "nav_tab_extract",
+                    onClick = { onSelectTab(0) }
+                )
+                ForestRailIconItem(
+                    icon = Icons.Outlined.ContentPaste,
+                    contentDescription = "Paste AI",
+                    selected = selectedTab == 1,
+                    testTag = "nav_tab_paste",
+                    onClick = { onSelectTab(1) }
+                )
+                ForestRailIconItem(
+                    icon = Icons.Outlined.Search,
+                    contentDescription = "Find & Kamus",
+                    selected = selectedTab == 2,
+                    testTag = "nav_tab_glossary",
+                    onClick = { onSelectTab(2) }
+                )
+                ForestRailIconItem(
+                    icon = Icons.Outlined.Layers,
+                    contentDescription = "Merge Subtitle",
+                    selected = selectedTab == 3,
+                    testTag = "nav_tab_merge",
+                    onClick = { onSelectTab(3) }
+                )
+                ForestRailIconItem(
+                    icon = Icons.Outlined.DynamicFeed,
+                    contentDescription = "Batch Translation",
+                    selected = selectedTab == 4,
+                    testTag = "nav_tab_batch",
+                    onClick = { onSelectTab(4) }
+                )
+            }
+
+            // Bottom Settings Gear Icon
+            ForestRailIconItem(
+                icon = Icons.Outlined.Settings,
+                contentDescription = "Pengaturan",
+                selected = false,
+                testTag = "open_theme_settings_button",
+                onClick = onOpenSettings
+            )
+        }
+    }
+}
+
+@Composable
+private fun ForestRailIconItem(
+    icon: ImageVector,
+    contentDescription: String,
+    selected: Boolean,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    val bg = if (selected) Color(0xFF2D5E46) else Color.Transparent
+    val tint = if (selected) Color(0xFFB7EFC5) else Color.White.copy(alpha = 0.78f)
+
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(bg)
+            .clickable(onClick = onClick)
+            .testTag(testTag),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(22.dp)
+        )
+    }
+}
+
+@Composable
 private fun ActiveTabContent(
     selectedTab: Int,
     isWideScreen: Boolean,
@@ -550,13 +677,23 @@ private fun ActiveTabContent(
     themeSettings: ThemeSettings,
     batchState: BatchQueueState,
     viewModel: SubtitleViewModel,
+    onNavigateToTab: (Int) -> Unit,
     onOpenFilePicker: () -> Unit,
+    onOpenSettings: () -> Unit,
     onSaveMergedFile: (String) -> Unit,
     onSelectMultipleFiles: () -> Unit,
     onChooseOutputFolder: () -> Unit,
     onNavigateToExtractSettings: () -> Unit
 ) {
     when (selectedTab) {
+        -1 -> HomeDashboardScreen(
+            uiState = uiState,
+            batchState = batchState,
+            onNavigateToTab = onNavigateToTab,
+            onOpenFilePicker = onOpenFilePicker,
+            onOpenSettings = onOpenSettings
+        )
+
         0 -> ExtractTabScreen(
             uiState = uiState,
             aiSettings = aiSettings,
