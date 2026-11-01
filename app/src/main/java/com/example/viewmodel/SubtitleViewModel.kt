@@ -1,0 +1,1665 @@
+package com.example.viewmodel
+
+import android.app.Application
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.data.AndroidBatchOutputWriter
+import com.example.data.BatchNotificationHelper
+import com.example.data.GeminiWebCookieClient
+import com.example.data.OpenAiCompatibleClient
+import com.example.data.ParsedGeminiCookies
+import com.example.data.PreferencesRepository
+import com.example.domain.BatchCueTranslator
+import com.example.domain.BatchFileCandidate
+import com.example.domain.BatchQueueEngine
+import com.example.domain.BatchTranslationAttemptOutput
+import com.example.domain.SampleSubtitles
+import com.example.domain.SubtitleParserAndMerger
+import com.example.model.AiProviderPreset
+import com.example.model.AiProviderSettings
+import com.example.model.BatchJobStatus
+import com.example.model.BatchQueueState
+import com.example.model.BatchSizeOption
+import com.example.model.BilingualOrder
+import com.example.model.ColorPreset
+import com.example.model.FileConflictPolicy
+import com.example.model.FindMatchItem
+import com.example.model.GlossaryRule
+import com.example.model.IndexFormatMode
+import com.example.model.LineSeparatorMode
+import com.example.model.MergeCompareItem
+import com.example.model.SubtitleCue
+import com.example.model.SubtitleDocument
+import com.example.model.TargetLanguageOption
+import com.example.model.ThemeMode
+import com.example.model.ThemeSettings
+import com.example.model.TranslationStylePreset
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import java.io.BufferedReader
+import java.io.File
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
+import java.util.UUID
+
+data class SubtitleUiState(
+    val document: SubtitleDocument,
+    val isSampleLoaded: Boolean = true,
+    // Tab 1: Extract & AI Prompt
+    val separatorMode: LineSeparatorMode = LineSeparatorMode.DOUBLE_SLASH,
+    val customSeparator: String = " // ",
+    val protectAssTags: Boolean = true,
+    val indexFormatMode: IndexFormatMode = IndexFormatMode.BRACKET,
+    val batchSizeOption: BatchSizeOption = BatchSizeOption.BATCH_100,
+    val selectedBatchIndex: Int = 0,
+    val includeAiPromptHeader: Boolean = true,
+    val includeGlossaryInPrompt: Boolean = true,
+    val targetLanguageOption: TargetLanguageOption = TargetLanguageOption.INDONESIAN,
+    val customTargetLanguage: String = "Bahasa Indonesia",
+    val stylePreset: TranslationStylePreset = TranslationStylePreset.ANIME_CASUAL,
+    val customPromptInstruction: String = TranslationStylePreset.ANIME_CASUAL.styleInstruction,
+    // In-App Gemini-Web2API & OpenAI-Compatible Translation Status + Realtime Card Animation
+    val isFetchingModels: Boolean = false,
+    val isVerifyingCookie: Boolean = false,
+    val isTranslatingAi: Boolean = false,
+    val aiTranslationStatusText: String? = null,
+    val aiCompletedBatches: Int = 0,
+    val aiTotalBatches: Int = 0,
+    val translatingCueIds: Set<Int> = emptySet(),
+    val recentlyTranslatedCueIds: Set<Int> = emptySet(),
+    // Tab 2: Paste AI
+    val pastedEditorText: String = "",
+    val parsedTranslations: Map<Int, String> = emptyMap(),
+    val autoApplyGlossaryBeforeMerge: Boolean = false,
+    // Tab 3: Find & Replace + Glossary
+    val glossarySubTabIndex: Int = 0, // 0 = Quick Find & Replace, 1 = Saved Glossary Rules
+    val findQuery: String = "",
+    val replaceWith: String = "",
+    val findCaseSensitive: Boolean = false,
+    val findWholeWord: Boolean = false,
+    val findUseRegex: Boolean = false,
+    val selectedStyleFilter: String = "ALL",
+    val selectedActorFilter: String = "ALL",
+    val undoTranslationsSnapshot: Map<Int, String>? = null,
+    val lastActionBannerMessage: String? = null,
+    // Tab 4: Merge & Save
+    val restoreLeadingAssTags: Boolean = true,
+    val bilingualMode: Boolean = false,
+    val bilingualOrder: BilingualOrder = BilingualOrder.TRANSLATION_TOP,
+    val bilingualAssSecondaryStyling: Boolean = true,
+    val showRawMergedPreview: Boolean = false
+) {
+    val batches: List<List<SubtitleCue>>
+        get() {
+            if (document.cues.isEmpty()) return emptyList()
+            val chunkSize = batchSizeOption.size
+            return if (chunkSize <= 0 || chunkSize >= document.cues.size) {
+                listOf(document.cues)
+            } else {
+                document.cues.chunked(chunkSize)
+            }
+        }
+
+    val activeBatchCues: List<SubtitleCue>
+        get() {
+            val allBatches = batches
+            if (allBatches.isEmpty()) return emptyList()
+            val safeIdx = selectedBatchIndex.coerceIn(0, allBatches.lastIndex)
+            return allBatches[safeIdx]
+        }
+
+    val matchedCount: Int
+        get() = document.cues.count { parsedTranslations.containsKey(it.id) }
+
+    val missingCueIds: List<Int>
+        get() = document.cues.map { it.id }.filter { !parsedTranslations.containsKey(it) }
+}
+
+class SubtitleViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val prefsRepo = PreferencesRepository(application.applicationContext)
+
+    private val _themeSettings = MutableStateFlow(prefsRepo.loadThemeSettings())
+    val themeSettings: StateFlow<ThemeSettings> = _themeSettings.asStateFlow()
+
+    private val _aiSettings = MutableStateFlow(prefsRepo.loadAiProviderSettings())
+    val aiSettings: StateFlow<AiProviderSettings> = _aiSettings.asStateFlow()
+
+    private val _glossaryRules = MutableStateFlow(prefsRepo.loadGlossaryRules())
+    val glossaryRules: StateFlow<List<GlossaryRule>> = _glossaryRules.asStateFlow()
+
+    private val notificationHelper = BatchNotificationHelper(application.applicationContext)
+
+    private val defaultBatchOutputDirectory: File by lazy {
+        val baseDir = application.applicationContext.getExternalFilesDir(null)
+            ?: application.applicationContext.filesDir
+        File(baseDir, "Translated_Subtitles").apply { mkdirs() }
+    }
+
+    private val _batchQueueState = MutableStateFlow(loadAndRecoverInitialBatchQueueState())
+    val batchQueueState: StateFlow<BatchQueueState> = _batchQueueState.asStateFlow()
+
+    private var activeTranslationJob: Job? = null
+    private var activeBatchQueueJob: Job? = null
+    @Volatile
+    private var batchPauseRequested: Boolean = false
+    @Volatile
+    private var batchCancelRequested: Boolean = false
+
+    private val initialDoc = SubtitleParserAndMerger.parseSubtitle(
+        fileName = SampleSubtitles.SAMPLE_ASS_FILENAME,
+        rawContent = SampleSubtitles.SAMPLE_ASS_CONTENT
+    )
+    private val initialDemoTranslations = SubtitleParserAndMerger.parseAiTranslatedLines(
+        SampleSubtitles.SAMPLE_ASS_AI_TRANSLATION_DEMO
+    )
+
+    private val _uiState = MutableStateFlow(
+        SubtitleUiState(
+            document = initialDoc,
+            isSampleLoaded = true,
+            pastedEditorText = SampleSubtitles.SAMPLE_ASS_AI_TRANSLATION_DEMO,
+            parsedTranslations = initialDemoTranslations,
+            findQuery = "Shibuya Ward",
+            replaceWith = "Distrik Shibuya"
+        )
+    )
+    val uiState: StateFlow<SubtitleUiState> = _uiState.asStateFlow()
+
+    // --- Gemini-Web2API Cookie & OpenAI-Compatible Provider Controls ---
+
+    fun selectAiProviderPreset(preset: AiProviderPreset) {
+        val current = _aiSettings.value
+        val updated = current.copy(
+            preset = preset,
+            baseUrl = if (preset == AiProviderPreset.CUSTOM) current.baseUrl else preset.defaultBaseUrl,
+            selectedModel = preset.defaultModel,
+            fetchedModels = emptyList()
+        )
+        _aiSettings.value = updated
+        prefsRepo.saveAiProviderSettings(updated)
+    }
+
+    fun updateAiBaseUrl(baseUrl: String) {
+        val updated = _aiSettings.value.copy(baseUrl = baseUrl)
+        _aiSettings.value = updated
+        prefsRepo.saveAiProviderSettings(updated)
+    }
+
+    fun updateAiApiKey(apiKey: String) {
+        val updated = _aiSettings.value.copy(apiKey = apiKey)
+        _aiSettings.value = updated
+        prefsRepo.saveAiProviderSettings(updated)
+    }
+
+    fun updateGeminiSecure1Psid(psid: String) {
+        val updated = _aiSettings.value.copy(geminiSecure1Psid = psid)
+        _aiSettings.value = updated
+        prefsRepo.saveAiProviderSettings(updated)
+    }
+
+    fun updateGeminiSecure1Psidts(psidts: String) {
+        val updated = _aiSettings.value.copy(geminiSecure1Psidts = psidts)
+        _aiSettings.value = updated
+        prefsRepo.saveAiProviderSettings(updated)
+    }
+
+    fun updateCombineSystemIntoUserPrompt(combine: Boolean) {
+        val updated = _aiSettings.value.copy(combineSystemIntoUserPrompt = combine)
+        _aiSettings.value = updated
+        prefsRepo.saveAiProviderSettings(updated)
+    }
+
+    fun applySmartPastedCookies(rawInput: String) {
+        val parsed = GeminiWebCookieClient.parseSmartCookieInput(rawInput)
+        if (!parsed.isValid && parsed.secure1Psidts.isBlank()) {
+            _uiState.update {
+                it.copy(
+                    lastActionBannerMessage = "Format cookie tidak ditemukan di Clipboard. Salin dari Cookie-Editor (JSON), header Cookie, atau nilai __Secure-1PSID."
+                )
+            }
+            return
+        }
+        val current = _aiSettings.value
+        val updated = current.copy(
+            geminiSecure1Psid = parsed.secure1Psid.ifBlank { current.geminiSecure1Psid },
+            geminiSecure1Psidts = parsed.secure1Psidts.ifBlank { current.geminiSecure1Psidts }
+        )
+        _aiSettings.value = updated
+        prefsRepo.saveAiProviderSettings(updated)
+        val psidNote = if (parsed.secure1Psid.isNotBlank()) "__Secure-1PSID" else ""
+        val psidtsNote = if (parsed.secure1Psidts.isNotBlank()) " + __Secure-1PSIDTS" else ""
+        _uiState.update {
+            it.copy(
+                lastActionBannerMessage = "Smart Paste berhasil mengisi cookie $psidNote$psidtsNote!"
+            )
+        }
+    }
+
+    fun applyExtractedCookies(cookies: ParsedGeminiCookies) {
+        val current = _aiSettings.value
+        val updated = current.copy(
+            geminiSecure1Psid = cookies.secure1Psid.ifBlank { current.geminiSecure1Psid },
+            geminiSecure1Psidts = cookies.secure1Psidts.ifBlank { current.geminiSecure1Psidts }
+        )
+        _aiSettings.value = updated
+        prefsRepo.saveAiProviderSettings(updated)
+        _uiState.update {
+            it.copy(
+                lastActionBannerMessage = "Cookie Gemini Web (__Secure-1PSID & __Secure-1PSIDTS) berhasil disimpan otomatis!"
+            )
+        }
+    }
+
+    fun verifyGeminiCookiesNow() {
+        val current = _aiSettings.value
+        if (_uiState.value.isVerifyingCookie) return
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isVerifyingCookie = true,
+                    aiTranslationStatusText = "Memverifikasi cookie __Secure-1PSID ke gemini.google.com..."
+                )
+            }
+            val result = GeminiWebCookieClient.verifyCookies(
+                psid = current.geminiSecure1Psid,
+                psidts = current.geminiSecure1Psidts
+            )
+            result.onSuccess { msg ->
+                _uiState.update {
+                    it.copy(
+                        isVerifyingCookie = false,
+                        aiTranslationStatusText = msg,
+                        lastActionBannerMessage = msg
+                    )
+                }
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(
+                        isVerifyingCookie = false,
+                        aiTranslationStatusText = "Verifikasi gagal: ${err.localizedMessage}",
+                        lastActionBannerMessage = "Verifikasi Cookie gagal: ${err.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun selectAiModel(modelId: String) {
+        val updated = _aiSettings.value.copy(selectedModel = modelId)
+        _aiSettings.value = updated
+        prefsRepo.saveAiProviderSettings(updated)
+    }
+
+    fun fetchModelsFromProvider() {
+        val settings = _aiSettings.value
+        if (_uiState.value.isFetchingModels) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isFetchingModels = true) }
+
+            val result = if (settings.preset == AiProviderPreset.GEMINI_WEB_COOKIE) {
+                GeminiWebCookieClient.fetchModelsForCookieMode(
+                    psid = settings.geminiSecure1Psid,
+                    psidts = settings.geminiSecure1Psidts
+                )
+            } else {
+                OpenAiCompatibleClient.fetchModels(
+                    baseUrl = settings.baseUrl,
+                    apiKey = settings.apiKey,
+                    geminiSecure1Psid = settings.geminiSecure1Psid,
+                    geminiSecure1Psidts = settings.geminiSecure1Psidts
+                )
+            }
+
+            result.onSuccess { models ->
+                val newSelected = if (settings.selectedModel in models) {
+                    settings.selectedModel
+                } else {
+                    models.firstOrNull() ?: settings.selectedModel
+                }
+                val updated = _aiSettings.value.copy(
+                    fetchedModels = models,
+                    selectedModel = newSelected
+                )
+                _aiSettings.value = updated
+                prefsRepo.saveAiProviderSettings(updated)
+                val sourceLabel = if (settings.preset == AiProviderPreset.GEMINI_WEB_COOKIE) {
+                    if (settings.hasGeminiCookie) "sesi Cookie Gemini Web" else "katalog Gemini-Web2API"
+                } else {
+                    settings.preset.label
+                }
+                _uiState.update {
+                    it.copy(
+                        isFetchingModels = false,
+                        lastActionBannerMessage = "Berhasil mengambil ${models.size} model dari $sourceLabel (termasuk ${models.firstOrNull() ?: newSelected})!"
+                    )
+                }
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(
+                        isFetchingModels = false,
+                        lastActionBannerMessage = "Gagal Fetch Model: ${err.localizedMessage ?: "Periksa Base URL / Cookie / API Key"}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun buildActiveModelSystemPrompt(): String {
+        val s = _uiState.value
+        val ai = _aiSettings.value
+        return SubtitleParserAndMerger.buildModelAdaptedSystemPrompt(
+            selectedModel = ai.selectedModel,
+            separatorMode = s.separatorMode,
+            customSeparator = s.customSeparator,
+            indexFormatMode = s.indexFormatMode,
+            includeGlossaryInPrompt = s.includeGlossaryInPrompt,
+            targetLanguageOption = s.targetLanguageOption,
+            customTargetLanguage = s.customTargetLanguage,
+            stylePreset = s.stylePreset,
+            customPromptInstruction = s.customPromptInstruction,
+            glossaryRules = _glossaryRules.value
+        )
+    }
+
+    fun translateCurrentBatchWithAi() {
+        val currentBatchIdx = _uiState.value.selectedBatchIndex
+        launchBatchTranslationJob(batchIndices = listOf(currentBatchIdx))
+    }
+
+    fun translateAllBatchesWithAi() {
+        val totalBatches = _uiState.value.batches.size
+        if (totalBatches == 0) return
+        launchBatchTranslationJob(batchIndices = (0 until totalBatches).toList())
+    }
+
+    fun cancelAiTranslation() {
+        activeTranslationJob?.cancel()
+        activeTranslationJob = null
+        _uiState.update {
+            it.copy(
+                isTranslatingAi = false,
+                translatingCueIds = emptySet(),
+                aiTranslationStatusText = "Terjemahan AI dihentikan oleh pengguna.",
+                lastActionBannerMessage = "Proses terjemahan AI dihentikan."
+            )
+        }
+    }
+
+    /**
+     * Updates a single subtitle cue's translation directly from the Dual-Layer Realtime Card.
+     */
+    fun updateSingleCueTranslation(cueId: Int, newTranslatedText: String) {
+        val currentState = _uiState.value
+        val updatedMap = LinkedHashMap(currentState.parsedTranslations).apply {
+            if (newTranslatedText.isBlank()) {
+                remove(cueId)
+            } else {
+                put(cueId, newTranslatedText.trim())
+            }
+        }
+        val formattedText = SubtitleParserAndMerger.formatTranslationsMapToEditorText(
+            updatedMap,
+            currentState.indexFormatMode
+        )
+        _uiState.update {
+            it.copy(
+                parsedTranslations = updatedMap,
+                pastedEditorText = formattedText
+            )
+        }
+    }
+
+    /**
+     * Replays or simulates a live, line-by-line realtime translation animation on the active batch cards
+     * so the user can visually inspect the original language on top and the animated translated language below.
+     */
+    fun simulateRealtimeTranslationOnActiveBatch() {
+        if (_uiState.value.isTranslatingAi) return
+
+        activeTranslationJob = viewModelScope.launch {
+            val sInitial = _uiState.value
+            val activeBatch = sInitial.activeBatchCues
+            if (activeBatch.isEmpty()) return@launch
+
+            val batchCueIds = activeBatch.map { it.id }.toSet()
+            val demoPool = if (sInitial.document.fileName == SampleSubtitles.SAMPLE_SRT_FILENAME) {
+                SubtitleParserAndMerger.parseAiTranslatedLines(SampleSubtitles.SAMPLE_SRT_AI_TRANSLATION_DEMO)
+            } else {
+                SubtitleParserAndMerger.parseAiTranslatedLines(SampleSubtitles.SAMPLE_ASS_AI_TRANSLATION_DEMO)
+            }
+
+            // Prepare target translations for each cue in the active batch
+            val targetBatchMap = linkedMapOf<Int, String>()
+            for (cue in activeBatch) {
+                val existingOrDemo = sInitial.parsedTranslations[cue.id]
+                    ?: demoPool[cue.id]
+                    ?: cue.cleanText.replace("\\N", " // ").replace("\n", " // ")
+                targetBatchMap[cue.id] = existingOrDemo
+            }
+
+            val glossaryAdjusted = if (sInitial.autoApplyGlossaryBeforeMerge) {
+                SubtitleParserAndMerger.applyGlossaryRulesToTranslations(
+                    targetBatchMap,
+                    _glossaryRules.value
+                ).first
+            } else {
+                targetBatchMap
+            }
+
+            // Step 1: Clear active batch translations briefly and mark all cues in batch as translating
+            val mapWithoutActiveBatch = LinkedHashMap(sInitial.parsedTranslations).apply {
+                batchCueIds.forEach { remove(it) }
+            }
+            _uiState.update {
+                it.copy(
+                    isTranslatingAi = true,
+                    aiCompletedBatches = 0,
+                    aiTotalBatches = 1,
+                    parsedTranslations = mapWithoutActiveBatch,
+                    translatingCueIds = batchCueIds,
+                    recentlyTranslatedCueIds = emptySet(),
+                    aiTranslationStatusText = "Animasi Penerjemahan Realtime berjalan pada ${activeBatch.size} kartu baris..."
+                )
+            }
+
+            try {
+                delay(320L)
+                val progressiveMap = LinkedHashMap(mapWithoutActiveBatch)
+                val remainingTranslating = batchCueIds.toMutableSet()
+                val newlyRevealed = linkedSetOf<Int>()
+
+                for ((idx, cue) in activeBatch.withIndex()) {
+                    val translatedLine = glossaryAdjusted[cue.id] ?: continue
+                    progressiveMap[cue.id] = translatedLine
+                    remainingTranslating.remove(cue.id)
+                    newlyRevealed.add(cue.id)
+
+                    val editorText = SubtitleParserAndMerger.formatTranslationsMapToEditorText(
+                        progressiveMap,
+                        _uiState.value.indexFormatMode
+                    )
+                    _uiState.update {
+                        it.copy(
+                            parsedTranslations = LinkedHashMap(progressiveMap),
+                            pastedEditorText = editorText,
+                            translatingCueIds = remainingTranslating.toSet(),
+                            recentlyTranslatedCueIds = newlyRevealed.toSet(),
+                            aiTranslationStatusText = "Menerjemahkan baris #${cue.id} (${idx + 1}/${activeBatch.size}) secara realtime..."
+                        )
+                    }
+                    delay(140L)
+                }
+
+                _uiState.update {
+                    it.copy(
+                        isTranslatingAi = false,
+                        aiCompletedBatches = 1,
+                        translatingCueIds = emptySet(),
+                        aiTranslationStatusText = "Animasi selesai! ${activeBatch.size} baris ditampilkan di bawah teks bahasa asli."
+                    )
+                }
+            } catch (_: CancellationException) {
+                // Cancelled
+            }
+        }
+    }
+
+    private fun launchBatchTranslationJob(batchIndices: List<Int>) {
+        if (_uiState.value.isTranslatingAi || batchIndices.isEmpty()) return
+
+        activeTranslationJob = viewModelScope.launch {
+            val sInitial = _uiState.value
+            val allBatches = sInitial.batches
+            val totalToRun = batchIndices.size
+
+            _uiState.update {
+                it.copy(
+                    isTranslatingAi = true,
+                    aiCompletedBatches = 0,
+                    aiTotalBatches = totalToRun,
+                    recentlyTranslatedCueIds = emptySet(),
+                    undoTranslationsSnapshot = it.parsedTranslations.takeIf { m -> m.isNotEmpty() },
+                    aiTranslationStatusText = "Menyiapkan terjemahan dengan model ${_aiSettings.value.selectedModel}..."
+                )
+            }
+
+            try {
+                for ((stepIdx, batchIndex) in batchIndices.withIndex()) {
+                    val batchCues = allBatches.getOrNull(batchIndex) ?: continue
+                    val batchCueIds = batchCues.map { it.id }.toSet()
+                    val firstId = batchCues.firstOrNull()?.id ?: 1
+                    val lastId = batchCues.lastOrNull()?.id ?: batchCues.size
+                    val currentAi = _aiSettings.value
+                    val currentState = _uiState.value
+
+                    _uiState.update {
+                        it.copy(
+                            selectedBatchIndex = batchIndex,
+                            translatingCueIds = batchCueIds,
+                            aiTranslationStatusText = "Menerjemahkan Batch ${batchIndex + 1}/${allBatches.size} (#$firstId–#$lastId) via ${currentAi.selectedModel}..."
+                        )
+                    }
+
+                    val systemPrompt = buildActiveModelSystemPrompt()
+                    val userLinesText = batchCues.joinToString("\n") { cue ->
+                        SubtitleParserAndMerger.formatCueForExtraction(
+                            cue = cue,
+                            separatorMode = currentState.separatorMode,
+                            customSeparator = currentState.customSeparator,
+                            protectAssTags = currentState.protectAssTags,
+                            indexFormatMode = currentState.indexFormatMode
+                        )
+                    }
+
+                    val responseResult = if (currentAi.preset == AiProviderPreset.GEMINI_WEB_COOKIE) {
+                        GeminiWebCookieClient.translateSubtitleBatchWithCookies(
+                            psid = currentAi.geminiSecure1Psid,
+                            psidts = currentAi.geminiSecure1Psidts,
+                            modelId = currentAi.selectedModel,
+                            systemPrompt = systemPrompt,
+                            numberedUserLines = userLinesText
+                        )
+                    } else {
+                        OpenAiCompatibleClient.translateSubtitleBatch(
+                            baseUrl = currentAi.baseUrl,
+                            apiKey = currentAi.apiKey,
+                            modelId = currentAi.selectedModel,
+                            systemPrompt = systemPrompt,
+                            numberedUserLines = userLinesText,
+                            temperature = currentAi.temperature,
+                            combineSystemIntoUserPrompt = currentAi.combineSystemIntoUserPrompt,
+                            geminiSecure1Psid = currentAi.geminiSecure1Psid,
+                            geminiSecure1Psidts = currentAi.geminiSecure1Psidts,
+                            allowNoApiKey = currentAi.preset.isGeminiWebFamily
+                        )
+                    }
+
+                    val translatedContent = responseResult.getOrElse { error ->
+                        _uiState.update {
+                            it.copy(
+                                isTranslatingAi = false,
+                                translatingCueIds = emptySet(),
+                                aiTranslationStatusText = "Gagal pada Batch ${batchIndex + 1}: ${error.localizedMessage}",
+                                lastActionBannerMessage = "Terjemahan AI gagal: ${error.localizedMessage}"
+                            )
+                        }
+                        return@launch
+                    }
+
+                    val newlyParsed = SubtitleParserAndMerger.parseAiTranslatedLines(translatedContent)
+                    if (newlyParsed.isEmpty()) {
+                        _uiState.update {
+                            it.copy(
+                                isTranslatingAi = false,
+                                translatingCueIds = emptySet(),
+                                aiTranslationStatusText = "Respons AI pada Batch ${batchIndex + 1} tidak memiliki format nomor urut yang valid.",
+                                lastActionBannerMessage = "Format nomor dari AI tidak terdeteksi pada Batch ${batchIndex + 1}."
+                            )
+                        }
+                        return@launch
+                    }
+
+                    val latestState = _uiState.value
+                    val processedNewLines = if (latestState.autoApplyGlossaryBeforeMerge) {
+                        SubtitleParserAndMerger.applyGlossaryRulesToTranslations(
+                            newlyParsed,
+                            _glossaryRules.value
+                        ).first
+                    } else {
+                        newlyParsed
+                    }
+
+                    // Cascade translated lines one by one onto the cards in realtime
+                    val progressiveMap = LinkedHashMap(latestState.parsedTranslations)
+                    val remainingTranslating = batchCueIds.toMutableSet()
+                    val newlyRevealed = LinkedHashSet(latestState.recentlyTranslatedCueIds)
+                    val delayPerLineMs = if (processedNewLines.size > 40) 20L else 45L
+
+                    for ((cueId, translatedLine) in processedNewLines.entries) {
+                        progressiveMap[cueId] = translatedLine
+                        remainingTranslating.remove(cueId)
+                        newlyRevealed.add(cueId)
+
+                        val formattedEditorText = SubtitleParserAndMerger.formatTranslationsMapToEditorText(
+                            progressiveMap,
+                            _uiState.value.indexFormatMode
+                        )
+                        _uiState.update {
+                            it.copy(
+                                parsedTranslations = LinkedHashMap(progressiveMap),
+                                pastedEditorText = formattedEditorText,
+                                translatingCueIds = remainingTranslating.toSet(),
+                                recentlyTranslatedCueIds = newlyRevealed.toSet(),
+                                aiTranslationStatusText = "Menampilkan terjemahan baris #$cueId secara realtime..."
+                            )
+                        }
+                        delay(delayPerLineMs)
+                    }
+
+                    _uiState.update {
+                        it.copy(
+                            translatingCueIds = emptySet(),
+                            aiCompletedBatches = stepIdx + 1,
+                            aiTranslationStatusText = "Batch ${batchIndex + 1} selesai (${processedNewLines.size} baris dipetakan)."
+                        )
+                    }
+                }
+
+                val finalMatched = _uiState.value.matchedCount
+                val totalCues = _uiState.value.document.cues.size
+                _uiState.update {
+                    it.copy(
+                        isTranslatingAi = false,
+                        translatingCueIds = emptySet(),
+                        aiTranslationStatusText = "Selesai! $finalMatched / $totalCues baris dialog berhasil diterjemahkan & siap di-Merge.",
+                        lastActionBannerMessage = "Terjemahan AI selesai ($finalMatched/$totalCues baris cocok)!"
+                    )
+                }
+            } catch (_: CancellationException) {
+                // Handled in cancelAiTranslation
+            }
+        }
+    }
+
+    // --- File Loading & Samples ---
+
+    fun loadSampleAss() {
+        activeTranslationJob?.cancel()
+        activeTranslationJob = null
+        val doc = SubtitleParserAndMerger.parseSubtitle(
+            fileName = SampleSubtitles.SAMPLE_ASS_FILENAME,
+            rawContent = SampleSubtitles.SAMPLE_ASS_CONTENT
+        )
+        val demoMap = SubtitleParserAndMerger.parseAiTranslatedLines(
+            SampleSubtitles.SAMPLE_ASS_AI_TRANSLATION_DEMO
+        )
+        _uiState.update {
+            it.copy(
+                document = doc,
+                isSampleLoaded = true,
+                selectedBatchIndex = 0,
+                isTranslatingAi = false,
+                translatingCueIds = emptySet(),
+                recentlyTranslatedCueIds = emptySet(),
+                pastedEditorText = SampleSubtitles.SAMPLE_ASS_AI_TRANSLATION_DEMO,
+                parsedTranslations = demoMap,
+                selectedStyleFilter = "ALL",
+                selectedActorFilter = "ALL",
+                undoTranslationsSnapshot = null,
+                lastActionBannerMessage = "Sampel .ASS Anime berhasil dimuat (${doc.cues.size} baris dialog)"
+            )
+        }
+    }
+
+    fun loadSampleSrt() {
+        activeTranslationJob?.cancel()
+        activeTranslationJob = null
+        val doc = SubtitleParserAndMerger.parseSubtitle(
+            fileName = SampleSubtitles.SAMPLE_SRT_FILENAME,
+            rawContent = SampleSubtitles.SAMPLE_SRT_CONTENT
+        )
+        val demoMap = SubtitleParserAndMerger.parseAiTranslatedLines(
+            SampleSubtitles.SAMPLE_SRT_AI_TRANSLATION_DEMO
+        )
+        _uiState.update {
+            it.copy(
+                document = doc,
+                isSampleLoaded = true,
+                selectedBatchIndex = 0,
+                isTranslatingAi = false,
+                translatingCueIds = emptySet(),
+                recentlyTranslatedCueIds = emptySet(),
+                pastedEditorText = SampleSubtitles.SAMPLE_SRT_AI_TRANSLATION_DEMO,
+                parsedTranslations = demoMap,
+                selectedStyleFilter = "ALL",
+                selectedActorFilter = "ALL",
+                undoTranslationsSnapshot = null,
+                lastActionBannerMessage = "Sampel .SRT Film berhasil dimuat (${doc.cues.size} baris dialog)"
+            )
+        }
+    }
+
+    fun loadSubtitleFromUri(uri: Uri) {
+        val context = getApplication<Application>().applicationContext
+        try {
+            activeTranslationJob?.cancel()
+            activeTranslationJob = null
+            val fileName = resolveFileName(uri) ?: "subtitle.ass"
+            val content = context.contentResolver.openInputStream(uri)?.use { stream ->
+                BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).readText()
+            } ?: return
+
+            val cleanContent = content.removePrefix("\uFEFF")
+            val parsedDoc = SubtitleParserAndMerger.parseSubtitle(fileName, cleanContent)
+
+            _uiState.update {
+                it.copy(
+                    document = parsedDoc,
+                    isSampleLoaded = false,
+                    selectedBatchIndex = 0,
+                    isTranslatingAi = false,
+                    translatingCueIds = emptySet(),
+                    recentlyTranslatedCueIds = emptySet(),
+                    pastedEditorText = "",
+                    parsedTranslations = emptyMap(),
+                    selectedStyleFilter = "ALL",
+                    selectedActorFilter = "ALL",
+                    undoTranslationsSnapshot = null,
+                    lastActionBannerMessage = "File $fileName dimuat (${parsedDoc.cues.size} dialog terdeteksi)"
+                )
+            }
+        } catch (e: Exception) {
+            _uiState.update {
+                it.copy(lastActionBannerMessage = "Gagal membaca file: ${e.localizedMessage ?: "Format tidak dikenali"}")
+            }
+        }
+    }
+
+    fun saveMergedSubtitleToUri(uri: Uri): Boolean {
+        val context = getApplication<Application>().applicationContext
+        return try {
+            val mergedContent = buildFinalMergedFileContent()
+            context.contentResolver.openOutputStream(uri, "wt")?.use { outStream ->
+                OutputStreamWriter(outStream, Charsets.UTF_8).use { writer ->
+                    writer.write(mergedContent)
+                }
+            }
+            _uiState.update {
+                it.copy(lastActionBannerMessage = "File hasil Merge berhasil disimpan ke perangkat!")
+            }
+            true
+        } catch (e: Exception) {
+            _uiState.update {
+                it.copy(lastActionBannerMessage = "Gagal menyimpan file: ${e.localizedMessage}")
+            }
+            false
+        }
+    }
+
+    private fun resolveFileName(uri: Uri): String? {
+        val context = getApplication<Application>().applicationContext
+        var name: String? = null
+        if (uri.scheme == "content") {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0) {
+                        name = cursor.getString(idx)
+                    }
+                }
+            }
+        }
+        return name ?: uri.lastPathSegment?.substringAfterLast('/')
+    }
+
+    // --- Tab 1: Extract & Copy Controls ---
+
+    fun setSeparatorMode(mode: LineSeparatorMode) {
+        _uiState.update { it.copy(separatorMode = mode) }
+    }
+
+    fun setCustomSeparator(custom: String) {
+        _uiState.update { it.copy(customSeparator = custom) }
+    }
+
+    fun setProtectAssTags(protect: Boolean) {
+        _uiState.update { it.copy(protectAssTags = protect) }
+    }
+
+    fun setIndexFormatMode(mode: IndexFormatMode) {
+        _uiState.update { it.copy(indexFormatMode = mode) }
+    }
+
+    fun setBatchSizeOption(option: BatchSizeOption) {
+        _uiState.update { it.copy(batchSizeOption = option, selectedBatchIndex = 0) }
+    }
+
+    fun selectBatchIndex(index: Int) {
+        _uiState.update { it.copy(selectedBatchIndex = index) }
+    }
+
+    fun setIncludeAiPromptHeader(include: Boolean) {
+        _uiState.update { it.copy(includeAiPromptHeader = include) }
+    }
+
+    fun setIncludeGlossaryInPrompt(include: Boolean) {
+        _uiState.update { it.copy(includeGlossaryInPrompt = include) }
+    }
+
+    fun setTargetLanguageOption(option: TargetLanguageOption) {
+        _uiState.update { it.copy(targetLanguageOption = option) }
+    }
+
+    fun setCustomTargetLanguage(lang: String) {
+        _uiState.update { it.copy(customTargetLanguage = lang) }
+    }
+
+    fun setTranslationStylePreset(preset: TranslationStylePreset) {
+        _uiState.update {
+            it.copy(
+                stylePreset = preset,
+                customPromptInstruction = preset.styleInstruction
+            )
+        }
+    }
+
+    fun setCustomPromptInstruction(instruction: String) {
+        _uiState.update { it.copy(customPromptInstruction = instruction) }
+    }
+
+    fun buildCurrentBatchOutput(withPromptHeader: Boolean): String {
+        val s = _uiState.value
+        val ai = _aiSettings.value
+        return SubtitleParserAndMerger.buildAiPromptAndExtractedText(
+            cuesSlice = s.activeBatchCues,
+            separatorMode = s.separatorMode,
+            customSeparator = s.customSeparator,
+            protectAssTags = s.protectAssTags,
+            indexFormatMode = s.indexFormatMode,
+            includeAiPromptHeader = withPromptHeader,
+            includeGlossaryInPrompt = s.includeGlossaryInPrompt,
+            targetLanguageOption = s.targetLanguageOption,
+            customTargetLanguage = s.customTargetLanguage,
+            stylePreset = s.stylePreset,
+            customPromptInstruction = s.customPromptInstruction,
+            glossaryRules = _glossaryRules.value,
+            selectedModel = ai.selectedModel
+        )
+    }
+
+    // --- Tab 2: Paste AI & Batch Append Controls ---
+
+    fun updatePastedEditorText(newText: String) {
+        var parsed = SubtitleParserAndMerger.parseAiTranslatedLines(newText)
+        if (_uiState.value.autoApplyGlossaryBeforeMerge && parsed.isNotEmpty()) {
+            parsed = SubtitleParserAndMerger.applyGlossaryRulesToTranslations(
+                parsed,
+                _glossaryRules.value
+            ).first
+        }
+        _uiState.update {
+            it.copy(
+                pastedEditorText = newText,
+                parsedTranslations = parsed
+            )
+        }
+    }
+
+    fun pasteOrAppendBatch(clipboardText: String, appendMode: Boolean) {
+        if (clipboardText.isBlank()) {
+            _uiState.update { it.copy(lastActionBannerMessage = "Clipboard kosong.") }
+            return
+        }
+        val incomingParsed = SubtitleParserAndMerger.parseAiTranslatedLines(clipboardText)
+        val currentState = _uiState.value
+
+        val combinedMap = if (appendMode) {
+            LinkedHashMap(currentState.parsedTranslations).apply {
+                putAll(incomingParsed)
+            }
+        } else {
+            LinkedHashMap(incomingParsed)
+        }
+
+        val finalMap = if (currentState.autoApplyGlossaryBeforeMerge) {
+            SubtitleParserAndMerger.applyGlossaryRulesToTranslations(
+                combinedMap,
+                _glossaryRules.value
+            ).first
+        } else {
+            combinedMap
+        }
+
+        val formattedText = if (finalMap.isNotEmpty()) {
+            SubtitleParserAndMerger.formatTranslationsMapToEditorText(
+                finalMap,
+                currentState.indexFormatMode
+            )
+        } else {
+            if (appendMode && currentState.pastedEditorText.isNotBlank()) {
+                currentState.pastedEditorText + "\n" + clipboardText.trim()
+            } else {
+                clipboardText.trim()
+            }
+        }
+
+        _uiState.update {
+            it.copy(
+                undoTranslationsSnapshot = currentState.parsedTranslations.takeIf { m -> m.isNotEmpty() },
+                pastedEditorText = formattedText,
+                parsedTranslations = finalMap,
+                lastActionBannerMessage = if (appendMode) {
+                    "Ditambahkan ${incomingParsed.size} baris baru (Total cocok: ${finalMap.size}/${it.document.cues.size})"
+                } else {
+                    "Ditempel ${incomingParsed.size} baris terjemahan AI"
+                }
+            )
+        }
+    }
+
+    fun clearPastedTranslations() {
+        val current = _uiState.value
+        _uiState.update {
+            it.copy(
+                undoTranslationsSnapshot = current.parsedTranslations.takeIf { m -> m.isNotEmpty() },
+                pastedEditorText = "",
+                parsedTranslations = emptyMap(),
+                lastActionBannerMessage = "Editor Paste AI dikosongkan"
+            )
+        }
+    }
+
+    fun fillDemoAiTranslations() {
+        val current = _uiState.value
+        val demoText = if (current.document.fileName == SampleSubtitles.SAMPLE_SRT_FILENAME) {
+            SampleSubtitles.SAMPLE_SRT_AI_TRANSLATION_DEMO
+        } else if (current.document.fileName == SampleSubtitles.SAMPLE_ASS_FILENAME) {
+            SampleSubtitles.SAMPLE_ASS_AI_TRANSLATION_DEMO
+        } else {
+            current.document.cues.joinToString("\n") { cue ->
+                SubtitleParserAndMerger.formatCueForExtraction(
+                    cue = cue,
+                    separatorMode = current.separatorMode,
+                    customSeparator = current.customSeparator,
+                    protectAssTags = true,
+                    indexFormatMode = current.indexFormatMode
+                )
+            }
+        }
+        pasteOrAppendBatch(demoText, appendMode = false)
+    }
+
+    fun setAutoApplyGlossaryBeforeMerge(enabled: Boolean) {
+        _uiState.update { state ->
+            val updatedMap = if (enabled && state.parsedTranslations.isNotEmpty()) {
+                SubtitleParserAndMerger.applyGlossaryRulesToTranslations(
+                    state.parsedTranslations,
+                    _glossaryRules.value
+                ).first
+            } else {
+                state.parsedTranslations
+            }
+            val updatedText = if (enabled && updatedMap.isNotEmpty()) {
+                SubtitleParserAndMerger.formatTranslationsMapToEditorText(updatedMap, state.indexFormatMode)
+            } else {
+                state.pastedEditorText
+            }
+            state.copy(
+                autoApplyGlossaryBeforeMerge = enabled,
+                parsedTranslations = updatedMap,
+                pastedEditorText = updatedText
+            )
+        }
+    }
+
+    // --- Tab 3: Find & Replace & Glossary Rules ---
+
+    fun setGlossarySubTab(index: Int) {
+        _uiState.update { it.copy(glossarySubTabIndex = index) }
+    }
+
+    fun setFindQuery(query: String) {
+        _uiState.update { it.copy(findQuery = query) }
+    }
+
+    fun setReplaceWith(replace: String) {
+        _uiState.update { it.copy(replaceWith = replace) }
+    }
+
+    fun toggleFindCaseSensitive() {
+        _uiState.update { it.copy(findCaseSensitive = !it.findCaseSensitive) }
+    }
+
+    fun toggleFindWholeWord() {
+        _uiState.update { it.copy(findWholeWord = !it.findWholeWord) }
+    }
+
+    fun toggleFindUseRegex() {
+        _uiState.update { it.copy(findUseRegex = !it.findUseRegex) }
+    }
+
+    fun setSelectedStyleFilter(style: String) {
+        _uiState.update { it.copy(selectedStyleFilter = style) }
+    }
+
+    fun setSelectedActorFilter(actor: String) {
+        _uiState.update { it.copy(selectedActorFilter = actor) }
+    }
+
+    fun computeLiveFindMatches(): List<FindMatchItem> {
+        val s = _uiState.value
+        return SubtitleParserAndMerger.findMatchesInTranslations(
+            document = s.document,
+            translations = s.parsedTranslations,
+            findQuery = s.findQuery,
+            replaceWith = s.replaceWith,
+            caseSensitive = s.findCaseSensitive,
+            wholeWord = s.findWholeWord,
+            useRegex = s.findUseRegex,
+            selectedStyleFilter = s.selectedStyleFilter,
+            selectedActorFilter = s.selectedActorFilter
+        )
+    }
+
+    fun replaceNextMatch() {
+        val s = _uiState.value
+        val matches = computeLiveFindMatches()
+        val firstItem = matches.firstOrNull() ?: return
+        val regex = SubtitleParserAndMerger.buildSearchRegex(
+            query = s.findQuery,
+            caseSensitive = s.findCaseSensitive,
+            wholeWord = s.findWholeWord,
+            useRegex = s.findUseRegex
+        ) ?: return
+
+        val currentLine = s.parsedTranslations[firstItem.cueId] ?: return
+        val firstRegexMatch = regex.find(currentLine) ?: return
+        val safeReplacement = if (s.findUseRegex) s.replaceWith else Regex.escapeReplacement(s.replaceWith)
+        val updatedLine = runCatching {
+            regex.replaceFirst(currentLine, safeReplacement)
+        }.getOrElse {
+            currentLine.replaceRange(firstRegexMatch.range, s.replaceWith)
+        }
+
+        val updatedMap = LinkedHashMap(s.parsedTranslations).apply {
+            put(firstItem.cueId, updatedLine)
+        }
+        val updatedText = SubtitleParserAndMerger.formatTranslationsMapToEditorText(
+            updatedMap,
+            s.indexFormatMode
+        )
+
+        _uiState.update {
+            it.copy(
+                undoTranslationsSnapshot = s.parsedTranslations,
+                parsedTranslations = updatedMap,
+                pastedEditorText = updatedText,
+                lastActionBannerMessage = "Diganti pada baris #${firstItem.cueId}"
+            )
+        }
+    }
+
+    fun replaceAllMatches() {
+        val s = _uiState.value
+        val matches = computeLiveFindMatches()
+        if (matches.isEmpty()) return
+
+        val updatedMap = LinkedHashMap(s.parsedTranslations)
+        var totalOccurrenceCount = 0
+        for (item in matches) {
+            totalOccurrenceCount += item.matchRanges.size
+            updatedMap[item.cueId] = item.previewReplacedText
+        }
+
+        val updatedText = SubtitleParserAndMerger.formatTranslationsMapToEditorText(
+            updatedMap,
+            s.indexFormatMode
+        )
+
+        _uiState.update {
+            it.copy(
+                undoTranslationsSnapshot = s.parsedTranslations,
+                parsedTranslations = updatedMap,
+                pastedEditorText = updatedText,
+                lastActionBannerMessage = "Berhasil mengganti $totalOccurrenceCount kecocokan pada ${matches.size} baris dialog"
+            )
+        }
+    }
+
+    fun undoLastReplace() {
+        val s = _uiState.value
+        val snapshot = s.undoTranslationsSnapshot ?: return
+        val restoredText = SubtitleParserAndMerger.formatTranslationsMapToEditorText(
+            snapshot,
+            s.indexFormatMode
+        )
+        _uiState.update {
+            it.copy(
+                parsedTranslations = snapshot,
+                pastedEditorText = restoredText,
+                undoTranslationsSnapshot = null,
+                lastActionBannerMessage = "Penggantian terakhir telah diurungkan (Undo berhasil)"
+            )
+        }
+    }
+
+    fun addGlossaryRule(
+        sourceTerm: String,
+        targetTerm: String,
+        isCaseSensitive: Boolean,
+        wholeWord: Boolean
+    ) {
+        val cleanSource = sourceTerm.trim()
+        val cleanTarget = targetTerm.trim()
+        if (cleanSource.isEmpty()) return
+
+        val newRule = GlossaryRule(
+            id = "rule_${UUID.randomUUID()}",
+            sourceTerm = cleanSource,
+            targetTerm = cleanTarget,
+            isCaseSensitive = isCaseSensitive,
+            wholeWord = wholeWord,
+            isEnabled = true
+        )
+        val updated = _glossaryRules.value + newRule
+        _glossaryRules.value = updated
+        prefsRepo.saveGlossaryRules(updated)
+        _uiState.update {
+            it.copy(lastActionBannerMessage = "Aturan kamus \"$cleanSource\" -> \"$cleanTarget\" disimpan")
+        }
+    }
+
+    fun toggleGlossaryRuleEnabled(ruleId: String) {
+        val updated = _glossaryRules.value.map {
+            if (it.id == ruleId) it.copy(isEnabled = !it.isEnabled) else it
+        }
+        _glossaryRules.value = updated
+        prefsRepo.saveGlossaryRules(updated)
+    }
+
+    fun deleteGlossaryRule(ruleId: String) {
+        val updated = _glossaryRules.value.filterNot { it.id == ruleId }
+        _glossaryRules.value = updated
+        prefsRepo.saveGlossaryRules(updated)
+    }
+
+    fun applyAllGlossaryRulesNow() {
+        val s = _uiState.value
+        if (s.parsedTranslations.isEmpty()) {
+            _uiState.update {
+                it.copy(lastActionBannerMessage = "Belum ada teks terjemahan di Tab Paste AI untuk diterapkan glosarium.")
+            }
+            return
+        }
+        val (updatedMap, count) = SubtitleParserAndMerger.applyGlossaryRulesToTranslations(
+            s.parsedTranslations,
+            _glossaryRules.value
+        )
+        if (count == 0) {
+            _uiState.update {
+                it.copy(lastActionBannerMessage = "Semua istilah sudah sesuai glosarium (0 perubahan).")
+            }
+            return
+        }
+        val updatedText = SubtitleParserAndMerger.formatTranslationsMapToEditorText(
+            updatedMap,
+            s.indexFormatMode
+        )
+        _uiState.update {
+            it.copy(
+                undoTranslationsSnapshot = s.parsedTranslations,
+                parsedTranslations = updatedMap,
+                pastedEditorText = updatedText,
+                lastActionBannerMessage = "Glosarium diterapkan: $count istilah diperbarui secara otomatis!"
+            )
+        }
+    }
+
+    // --- Tab 4: Merge & Save Controls ---
+
+    fun setRestoreLeadingAssTags(restore: Boolean) {
+        _uiState.update { it.copy(restoreLeadingAssTags = restore) }
+    }
+
+    fun setBilingualMode(enabled: Boolean) {
+        _uiState.update { it.copy(bilingualMode = enabled) }
+    }
+
+    fun setBilingualOrder(order: BilingualOrder) {
+        _uiState.update { it.copy(bilingualOrder = order) }
+    }
+
+    fun setBilingualAssSecondaryStyling(enabled: Boolean) {
+        _uiState.update { it.copy(bilingualAssSecondaryStyling = enabled) }
+    }
+
+    fun setShowRawMergedPreview(showRaw: Boolean) {
+        _uiState.update { it.copy(showRawMergedPreview = showRaw) }
+    }
+
+    fun buildFinalMergedFileContent(): String {
+        val s = _uiState.value
+        val workingTranslations = if (s.autoApplyGlossaryBeforeMerge) {
+            SubtitleParserAndMerger.applyGlossaryRulesToTranslations(
+                s.parsedTranslations,
+                _glossaryRules.value
+            ).first
+        } else {
+            s.parsedTranslations
+        }
+        return SubtitleParserAndMerger.generateMergedFileContent(
+            document = s.document,
+            translations = workingTranslations,
+            separatorMode = s.separatorMode,
+            customSeparator = s.customSeparator,
+            restoreLeadingAssTags = s.restoreLeadingAssTags,
+            bilingualMode = s.bilingualMode,
+            bilingualOrder = s.bilingualOrder,
+            bilingualAssSecondaryStyling = s.bilingualAssSecondaryStyling
+        )
+    }
+
+    fun buildMergeCompareList(): List<MergeCompareItem> {
+        val s = _uiState.value
+        return SubtitleParserAndMerger.buildMergeCompareItems(
+            document = s.document,
+            translations = s.parsedTranslations,
+            separatorMode = s.separatorMode,
+            customSeparator = s.customSeparator,
+            restoreLeadingAssTags = s.restoreLeadingAssTags,
+            bilingualMode = s.bilingualMode,
+            bilingualOrder = s.bilingualOrder,
+            bilingualAssSecondaryStyling = s.bilingualAssSecondaryStyling
+        )
+    }
+
+    fun clearBannerMessage() {
+        _uiState.update { it.copy(lastActionBannerMessage = null) }
+    }
+
+    fun showBannerMessage(msg: String) {
+        _uiState.update { it.copy(lastActionBannerMessage = msg) }
+    }
+
+    // --- Theme Settings Controls (F-06) ---
+
+    fun updateThemeMode(mode: ThemeMode) {
+        val updated = _themeSettings.value.copy(themeMode = mode)
+        _themeSettings.value = updated
+        prefsRepo.saveThemeSettings(updated)
+    }
+
+    fun updateColorPreset(preset: ColorPreset) {
+        val updated = _themeSettings.value.copy(colorPreset = preset, useDynamicColor = false)
+        _themeSettings.value = updated
+        prefsRepo.saveThemeSettings(updated)
+    }
+
+    fun updateUseDynamicColor(enabled: Boolean) {
+        val updated = _themeSettings.value.copy(useDynamicColor = enabled)
+        _themeSettings.value = updated
+        prefsRepo.saveThemeSettings(updated)
+    }
+
+    fun updatePureBlackAmoled(enabled: Boolean) {
+        val updated = _themeSettings.value.copy(pureBlackAmoled = enabled)
+        _themeSettings.value = updated
+        prefsRepo.saveThemeSettings(updated)
+    }
+
+    fun updateEditorFontSizeSp(sizeSp: Int) {
+        val updated = _themeSettings.value.copy(editorFontSizeSp = sizeSp.coerceIn(11, 17))
+        _themeSettings.value = updated
+        prefsRepo.saveThemeSettings(updated)
+    }
+
+    fun updateUseMonospaceFont(useMono: Boolean) {
+        val updated = _themeSettings.value.copy(useMonospaceFont = useMono)
+        _themeSettings.value = updated
+        prefsRepo.saveThemeSettings(updated)
+    }
+
+    // --- Tab 5: Batch Subtitle Translation Queue ---
+
+    private fun loadAndRecoverInitialBatchQueueState(): BatchQueueState {
+        val defaultPath = defaultBatchOutputDirectory.absolutePath
+        val defaultDisplay = "Translated_Subtitles ($defaultPath)"
+        val persisted = prefsRepo.loadBatchQueueState(defaultPath)
+            ?: return BatchQueueState(
+                outputFolderUriOrPath = defaultPath,
+                outputFolderDisplayName = defaultDisplay,
+                isOutputFolderWritable = true
+            )
+        val writer = AndroidBatchOutputWriter(
+            context = getApplication<Application>().applicationContext,
+            folderUriOrPath = persisted.outputFolderUriOrPath.ifBlank { defaultPath }
+        )
+        val recovered = BatchQueueEngine.recoverPersistedBatchState(persisted, writer)
+        prefsRepo.saveBatchQueueState(recovered)
+        return recovered
+    }
+
+    private fun updateAndPersistBatchState(transform: (BatchQueueState) -> BatchQueueState) {
+        _batchQueueState.update { current ->
+            val next = transform(current)
+            prefsRepo.saveBatchQueueState(next)
+            next
+        }
+    }
+
+    fun addUrisToBatchQueue(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        val context = getApplication<Application>().applicationContext
+        val candidates = mutableListOf<BatchFileCandidate>()
+        val readWarnings = mutableListOf<String>()
+
+        for (uri in uris) {
+            val fileName = resolveFileName(uri) ?: "subtitle_${uri.lastPathSegment ?: "unknown"}.srt"
+            try {
+                val rawText = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).readText()
+                }
+                if (rawText == null) {
+                    readWarnings.add("Dilewati '$fileName': Gagal membuka stream file.")
+                } else {
+                    candidates.add(
+                        BatchFileCandidate(
+                            fileName = fileName,
+                            sourceUriString = uri.toString(),
+                            rawContent = rawText.removePrefix("\uFEFF")
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                readWarnings.add("Dilewati '$fileName': ${e.localizedMessage ?: "Tidak dapat dibaca"}")
+            }
+        }
+
+        updateAndPersistBatchState { current ->
+            val next = BatchQueueEngine.enqueueFiles(current, candidates)
+            val allWarnings = readWarnings + next.preFlightWarnings
+            next.copy(
+                preFlightWarnings = allWarnings,
+                statusBannerMessage = if (allWarnings.isNotEmpty()) {
+                    "File ditambahkan (${next.totalFiles} dalam antrean, ${allWarnings.size} peringatan praperiksa)."
+                } else {
+                    "Berhasil menambahkan ${candidates.size} file ke antrean Batch Translation."
+                }
+            )
+        }
+    }
+
+    fun addCandidatesToBatchQueue(candidates: List<BatchFileCandidate>) {
+        updateAndPersistBatchState { current ->
+            BatchQueueEngine.enqueueFiles(current, candidates)
+        }
+    }
+
+    fun loadSampleEpisodeFilesToBatchQueue() {
+        val sampleCandidates = SampleSubtitles.buildBatchEpisodeSampleCandidates()
+        addCandidatesToBatchQueue(sampleCandidates)
+    }
+
+    fun moveBatchJobUp(jobId: String) {
+        updateAndPersistBatchState { current ->
+            BatchQueueEngine.moveJobUp(current, jobId)
+        }
+    }
+
+    fun moveBatchJobDown(jobId: String) {
+        updateAndPersistBatchState { current ->
+            BatchQueueEngine.moveJobDown(current, jobId)
+        }
+    }
+
+    fun removeBatchJob(jobId: String) {
+        updateAndPersistBatchState { current ->
+            BatchQueueEngine.removeJob(current, jobId)
+        }
+    }
+
+    fun setBatchOutputFolderUri(treeUri: Uri) {
+        val context = getApplication<Application>().applicationContext
+        runCatching {
+            val takeFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(treeUri, takeFlags)
+        }
+        val uriString = treeUri.toString()
+        val writer = AndroidBatchOutputWriter(context, uriString)
+        val (writable, errMsg) = writer.isOutputFolderWritable()
+        val readableSegment = treeUri.lastPathSegment?.substringAfterLast(':') ?: uriString
+        updateAndPersistBatchState { current ->
+            current.copy(
+                outputFolderUriOrPath = uriString,
+                outputFolderDisplayName = "SAF Folder: $readableSegment ($uriString)",
+                isOutputFolderWritable = writable,
+                outputFolderValidationMessage = errMsg,
+                statusBannerMessage = if (writable) {
+                    "Folder output batch dipilih: $readableSegment"
+                } else {
+                    errMsg ?: "Folder output tidak dapat ditulisi."
+                }
+            )
+        }
+    }
+
+    fun resetBatchOutputFolderToDefault() {
+        val defaultPath = defaultBatchOutputDirectory.absolutePath
+        val writer = AndroidBatchOutputWriter(getApplication<Application>().applicationContext, defaultPath)
+        val (writable, errMsg) = writer.isOutputFolderWritable()
+        updateAndPersistBatchState { current ->
+            current.copy(
+                outputFolderUriOrPath = defaultPath,
+                outputFolderDisplayName = "Translated_Subtitles ($defaultPath)",
+                isOutputFolderWritable = writable,
+                outputFolderValidationMessage = errMsg,
+                statusBannerMessage = "Folder output batch dikembalikan ke Translated_Subtitles."
+            )
+        }
+    }
+
+    fun setBatchConflictPolicy(policy: FileConflictPolicy) {
+        updateAndPersistBatchState { current ->
+            current.copy(conflictPolicy = policy)
+        }
+    }
+
+    fun setBatchMaxRetries(maxRetries: Int) {
+        val coerced = maxRetries.coerceIn(1, 10)
+        updateAndPersistBatchState { current ->
+            current.copy(
+                maxRetries = coerced,
+                jobs = current.jobs.map { job ->
+                    if (!job.status.isTerminal) job.copy(maxRetries = coerced) else job
+                }
+            )
+        }
+    }
+
+    fun setBatchNotificationsEnabled(enabled: Boolean) {
+        updateAndPersistBatchState { current ->
+            current.copy(notificationsEnabled = enabled)
+        }
+    }
+
+    fun clearCompletedBatchJobs() {
+        updateAndPersistBatchState { current ->
+            BatchQueueEngine.clearCompletedJobs(current)
+        }
+    }
+
+    fun retryFailedBatchJobs() {
+        updateAndPersistBatchState { current ->
+            BatchQueueEngine.retryFailedAndNeedsAttentionJobs(current)
+        }
+        startBatchTranslationQueue()
+    }
+
+    fun pauseBatchTranslationQueue() {
+        batchPauseRequested = true
+        updateAndPersistBatchState { current ->
+            current.copy(
+                statusBannerMessage = "Menjeda antrean setelah langkah saat ini selesai..."
+            )
+        }
+    }
+
+    fun resumeBatchTranslationQueue() {
+        startBatchTranslationQueue()
+    }
+
+    fun cancelBatchTranslationQueue() {
+        batchCancelRequested = true
+        activeBatchQueueJob?.cancel()
+        activeBatchQueueJob = null
+        val cancelledState = BatchQueueEngine.cancelBatch(_batchQueueState.value)
+        val notifPayload = notificationHelper.notifyBatchTerminalState(cancelledState)
+        val finalState = cancelledState.copy(
+            lastNotificationTitle = notifPayload?.title ?: cancelledState.lastNotificationTitle,
+            lastNotificationMessage = notifPayload?.message ?: cancelledState.lastNotificationMessage
+        )
+        _batchQueueState.value = finalState
+        prefsRepo.saveBatchQueueState(finalState)
+    }
+
+    fun startBatchTranslationQueue(customTranslatorForTesting: BatchCueTranslator? = null) {
+        val current = _batchQueueState.value
+        if (current.isRunning) return
+        val hasRunnable = BatchQueueEngine.findNextRunnableJob(current) != null
+        if (!hasRunnable) {
+            updateAndPersistBatchState {
+                it.copy(statusBannerMessage = "Tidak ada file berstatus Queued atau Retry Queued untuk diproses.")
+            }
+            return
+        }
+
+        // Validate AI credentials when using real translator
+        val ai = _aiSettings.value
+        if (customTranslatorForTesting == null) {
+            if (ai.preset == AiProviderPreset.GEMINI_WEB_COOKIE && ai.geminiSecure1Psid.trim().isEmpty()) {
+                updateAndPersistBatchState {
+                    it.copy(
+                        statusBannerMessage = "Cookie __Secure-1PSID belum diisi! Buka pengaturan AI atau pilih provider lain."
+                    )
+                }
+                return
+            }
+            if (!ai.preset.isGeminiWebFamily && ai.apiKey.trim().isEmpty()) {
+                updateAndPersistBatchState {
+                    it.copy(
+                        statusBannerMessage = "API Key untuk ${ai.preset.label} belum diisi! Buka pengaturan AI terlebih dahulu."
+                    )
+                }
+                return
+            }
+        }
+
+        batchPauseRequested = false
+        batchCancelRequested = false
+
+        val folderPath = current.outputFolderUriOrPath.ifBlank { defaultBatchOutputDirectory.absolutePath }
+        val outputWriter = AndroidBatchOutputWriter(
+            context = getApplication<Application>().applicationContext,
+            folderUriOrPath = folderPath
+        )
+        val translator = customTranslatorForTesting ?: buildProductionBatchCueTranslator()
+
+        activeBatchQueueJob = viewModelScope.launch {
+            try {
+                val s = _uiState.value
+                val targetLangName = if (s.targetLanguageOption == TargetLanguageOption.CUSTOM) {
+                    s.customTargetLanguage.ifBlank { "Bahasa Indonesia" }
+                } else {
+                    s.targetLanguageOption.label
+                }
+
+                val finalState = BatchQueueEngine.executeSequentialQueue(
+                    initialState = _batchQueueState.value.copy(
+                        outputFolderUriOrPath = folderPath
+                    ),
+                    translator = translator,
+                    outputWriter = outputWriter,
+                    glossaryRules = if (s.autoApplyGlossaryBeforeMerge) _glossaryRules.value else emptyList(),
+                    protectAssStructuralTags = s.restoreLeadingAssTags,
+                    sourceLanguage = "Auto",
+                    targetLanguage = targetLangName,
+                    checkUntranslatedSourceLeakage = true,
+                    shouldPause = { batchPauseRequested },
+                    shouldCancel = { batchCancelRequested },
+                    onStateChanged = { intermediate ->
+                        _batchQueueState.value = intermediate
+                        prefsRepo.saveBatchQueueState(intermediate)
+                    }
+                )
+
+                // If queue reached a terminal state (not merely paused), trigger native phone notification
+                if (finalState.isQueueCompletelyFinished) {
+                    val notifPayload = notificationHelper.notifyBatchTerminalState(finalState)
+                    val notifiedState = finalState.copy(
+                        lastNotificationTitle = notifPayload?.title ?: finalState.lastNotificationTitle,
+                        lastNotificationMessage = notifPayload?.message ?: finalState.lastNotificationMessage
+                    )
+                    _batchQueueState.value = notifiedState
+                    prefsRepo.saveBatchQueueState(notifiedState)
+                }
+            } catch (_: CancellationException) {
+                // Handled in cancelBatchTranslationQueue
+            }
+        }
+    }
+
+    private fun buildProductionBatchCueTranslator(): BatchCueTranslator {
+        return BatchCueTranslator { _, _, cuesToTranslate, onCueProgress ->
+            runCatching {
+                val s = _uiState.value
+                val ai = _aiSettings.value
+                val chunkSize = s.batchSizeOption.size.let { if (it <= 0) 80 else it }
+                val chunks = cuesToTranslate.chunked(chunkSize)
+                val accumulatedMap = LinkedHashMap<Int, String>()
+
+                for (chunk in chunks) {
+                    if (batchCancelRequested || batchPauseRequested) {
+                        throw IllegalStateException("Proses antrean dihentikan atau dijeda oleh pengguna.")
+                    }
+                    val systemPrompt = buildActiveModelSystemPrompt()
+                    val userLinesText = chunk.joinToString("\n") { cue ->
+                        SubtitleParserAndMerger.formatCueForExtraction(
+                            cue = cue,
+                            separatorMode = s.separatorMode,
+                            customSeparator = s.customSeparator,
+                            protectAssTags = s.protectAssTags,
+                            indexFormatMode = s.indexFormatMode
+                        )
+                    }
+
+                    val apiResult = if (ai.preset == AiProviderPreset.GEMINI_WEB_COOKIE) {
+                        GeminiWebCookieClient.translateSubtitleBatchWithCookies(
+                            psid = ai.geminiSecure1Psid,
+                            psidts = ai.geminiSecure1Psidts,
+                            modelId = ai.selectedModel,
+                            systemPrompt = systemPrompt,
+                            numberedUserLines = userLinesText
+                        )
+                    } else {
+                        OpenAiCompatibleClient.translateSubtitleBatch(
+                            baseUrl = ai.baseUrl,
+                            apiKey = ai.apiKey,
+                            modelId = ai.selectedModel,
+                            systemPrompt = systemPrompt,
+                            numberedUserLines = userLinesText,
+                            temperature = ai.temperature,
+                            combineSystemIntoUserPrompt = ai.combineSystemIntoUserPrompt,
+                            geminiSecure1Psid = ai.geminiSecure1Psid,
+                            geminiSecure1Psidts = ai.geminiSecure1Psidts,
+                            allowNoApiKey = ai.preset.isGeminiWebFamily
+                        )
+                    }
+
+                    val rawResponse = apiResult.getOrElse { err ->
+                        throw IllegalStateException(err.message ?: "Gagal menerjemahkan batch melalui API.")
+                    }
+
+                    val parsedChunk = SubtitleParserAndMerger.parseAiTranslatedLines(rawResponse)
+                    if (parsedChunk.isEmpty()) {
+                        throw IllegalStateException("Respons AI tidak mengandung format nomor indeks [ID] yang valid.")
+                    }
+                    accumulatedMap.putAll(parsedChunk)
+                    onCueProgress(accumulatedMap.size)
+                }
+
+                BatchTranslationAttemptOutput(translatedCues = accumulatedMap)
+            }
+        }
+    }
+}

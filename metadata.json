@@ -1,0 +1,6 @@
+{
+  "name": "SubAI Extractor",
+  "description": "Utilitas ekstraktor, glosarium Find & Replace, dan penggabung cerdas subtitle (.ASS, .SSA, .SRT, .VTT) untuk penerjemahan AI Chat tanpa merusak timestamp maupun tag typesetting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
