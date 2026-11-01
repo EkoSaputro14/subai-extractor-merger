@@ -392,15 +392,15 @@ private fun QuickFindReplaceControlsCard(
                     .testTag("replace_with_input")
             )
 
-            // Toggle Switches Row: Case sensitive + Regex + Whole Word
-            Row(
+            // Toggle Switches FlowRow: Case sensitive + Regex + Whole Word (responsive on compact widths)
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Switch(
                         checked = uiState.findCaseSensitive,
@@ -415,7 +415,7 @@ private fun QuickFindReplaceControlsCard(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Switch(
                         checked = uiState.findUseRegex,

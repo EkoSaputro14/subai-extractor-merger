@@ -352,8 +352,12 @@ fun SubAiExtractorMainScreen(
                                 BadgedBox(
                                     badge = {
                                         if (uiState.matchedCount > 0) {
-                                            Badge {
-                                                Text("${uiState.matchedCount}/${uiState.document.cues.size}")
+                                            val isAllMatched = uiState.matchedCount >= uiState.document.cues.size && uiState.document.cues.isNotEmpty()
+                                            Badge(
+                                                containerColor = if (isAllMatched) ForestGreenDark else MaterialTheme.colorScheme.primary,
+                                                contentColor = Color.White
+                                            ) {
+                                                Text(if (isAllMatched) "✓" else "${uiState.matchedCount}")
                                             }
                                         }
                                     }
@@ -382,7 +386,12 @@ fun SubAiExtractorMainScreen(
                                 BadgedBox(
                                     badge = {
                                         if (enabledRulesCount > 0) {
-                                            Badge { Text("$enabledRulesCount") }
+                                            Badge(
+                                                containerColor = ForestGreenDark,
+                                                contentColor = Color.White
+                                            ) {
+                                                Text("$enabledRulesCount")
+                                            }
                                         }
                                     }
                                 ) {
@@ -430,7 +439,10 @@ fun SubAiExtractorMainScreen(
                                 BadgedBox(
                                     badge = {
                                         if (batchState.totalFiles > 0) {
-                                            Badge {
+                                            Badge(
+                                                containerColor = ForestGreenDark,
+                                                contentColor = Color.White
+                                            ) {
                                                 Text("${batchState.completedCount}/${batchState.totalFiles}")
                                             }
                                         }

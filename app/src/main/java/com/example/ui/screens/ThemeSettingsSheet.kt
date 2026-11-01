@@ -6,8 +6,10 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -134,103 +136,41 @@ fun SettingsScreenContent(
     // 0 = Umum/Semua, 1 = AI Provider, 2 = Tema, 3 = Editor, 4 = Pembaruan
     var selectedCategory by rememberSaveable { mutableIntStateOf(0) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        // Top Header: [ ← ] Pengaturan (matching Panel 6 of Reference Design)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Kembali"
-                )
-            }
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-                text = "Pengaturan",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-        }
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val isWideSettings = maxWidth >= 560.dp
 
-        // Two-Column Layout matching Panel 6: Left Category Rail + Right Content Pane
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            // Left Category Column
-            Column(
-                modifier = Modifier.width(114.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                SettingsCategoryPill(
-                    icon = Icons.Outlined.Settings,
-                    label = "Umum",
-                    selected = selectedCategory == 0,
-                    isDark = isDark,
-                    onClick = { selectedCategory = 0 }
-                )
-                SettingsCategoryPill(
-                    icon = Icons.Outlined.Cloud,
-                    label = "AI Provider",
-                    selected = selectedCategory == 1,
-                    isDark = isDark,
-                    onClick = { selectedCategory = 1 }
-                )
-                SettingsCategoryPill(
-                    icon = Icons.Outlined.Palette,
-                    label = "Tema",
-                    selected = selectedCategory == 2,
-                    isDark = isDark,
-                    onClick = { selectedCategory = 2 }
-                )
-                SettingsCategoryPill(
-                    icon = Icons.Outlined.Edit,
-                    label = "Editor",
-                    selected = selectedCategory == 3,
-                    isDark = isDark,
-                    onClick = { selectedCategory = 3 }
-                )
-                SettingsCategoryPill(
-                    icon = Icons.Outlined.Inventory2,
-                    label = "Pembaruan",
-                    selected = selectedCategory == 4,
-                    isDark = isDark,
-                    onClick = { selectedCategory = 4 }
-                )
-            }
+        val categoryItems = listOf(
+            Triple(0, "Umum", Icons.Outlined.Settings),
+            Triple(1, "AI Provider", Icons.Outlined.Cloud),
+            Triple(2, "Tema", Icons.Outlined.Palette),
+            Triple(3, "Editor", Icons.Outlined.Edit),
+            Triple(4, "Pembaruan", Icons.Outlined.Inventory2)
+        )
 
-            // Right Detail Pane Card
-            Card(
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                border = BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
-                )
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+        val detailPaneComposable: @Composable (Modifier) -> Unit = { paneModifier ->
+            if (selectedCategory == 1) {
+                // Render AI Provider card directly at full pane width without double-card nesting
+                Box(modifier = paneModifier) {
+                    aiProviderSection()
+                }
+            } else {
+                Card(
+                    modifier = paneModifier,
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                    )
                 ) {
-                    if (selectedCategory == 1) {
-                        // AI Provider Section
-                        aiProviderSection()
-                    } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
                         // 1. Tema Tampilan (Sistem, Terang, Gelap) matching Panel 6
                         if (selectedCategory == 0 || selectedCategory == 2) {
                             Text(
@@ -451,7 +391,7 @@ fun SettingsScreenContent(
                             }
                         }
 
-                        // 4. Cek Pembaruan Card matching Panel 6 (v1.2.0 Build 3 + Live GitHub Release Check & Download)
+                        // 4. Cek Pembaruan Card matching Panel 6
                         if (selectedCategory == 0 || selectedCategory == 4) {
                             AppVersionAndUpdateSection(
                                 updateState = appUpdateState,
@@ -465,6 +405,83 @@ fun SettingsScreenContent(
                 }
             }
         }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Top Header: [ ← ] Pengaturan
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Kembali"
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Pengaturan",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            if (isWideSettings) {
+                // Wide Screen Two-Column Layout matching Panel 6: Left Category Rail (148.dp) + Right Content Pane
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column(
+                        modifier = Modifier.width(148.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        categoryItems.forEach { (idx, label, icon) ->
+                            SettingsCategoryPill(
+                                icon = icon,
+                                label = label,
+                                selected = selectedCategory == idx,
+                                isDark = isDark,
+                                fillWidth = true,
+                                onClick = { selectedCategory = idx }
+                            )
+                        }
+                    }
+
+                    detailPaneComposable(Modifier.weight(1f))
+                }
+            } else {
+                // Compact Screen: Horizontal Scrollable Category Pills on Top + 100% Full-Width Detail Pane Below
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    categoryItems.forEach { (idx, label, icon) ->
+                        SettingsCategoryPill(
+                            icon = icon,
+                            label = label,
+                            selected = selectedCategory == idx,
+                            isDark = isDark,
+                            fillWidth = false,
+                            onClick = { selectedCategory = idx }
+                        )
+                    }
+                }
+
+                detailPaneComposable(Modifier.fillMaxWidth())
+            }
+        }
     }
 }
 
@@ -474,12 +491,13 @@ private fun SettingsCategoryPill(
     label: String,
     selected: Boolean,
     isDark: Boolean,
+    fillWidth: Boolean = true,
     onClick: () -> Unit
 ) {
     val bg = if (selected) {
         if (isDark) Color(0xFF214431) else SageHighlightFill
     } else {
-        Color.Transparent
+        if (fillWidth) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerLow
     }
     val fg = if (selected) {
         if (isDark) Color(0xFF8CE0AF) else ForestGreenPrimary
@@ -490,13 +508,15 @@ private fun SettingsCategoryPill(
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = bg,
-        modifier = Modifier
-            .fillMaxWidth()
+        border = if (!fillWidth && !selected) {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        } else null,
+        modifier = (if (fillWidth) Modifier.fillMaxWidth() else Modifier)
             .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 11.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -511,8 +531,7 @@ private fun SettingsCategoryPill(
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 color = fg,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 1
             )
         }
     }

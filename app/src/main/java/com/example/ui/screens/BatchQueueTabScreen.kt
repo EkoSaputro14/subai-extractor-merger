@@ -160,8 +160,8 @@ fun BatchQueueTabScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Batch Translation",
-                                style = MaterialTheme.typography.titleLarge,
+                                text = "Ringkasan Antrean Batch",
+                                style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
 
@@ -194,11 +194,11 @@ fun BatchQueueTabScreen(
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(18.dp)
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             // Left: Circular Progress Ring
                             Box(
-                                modifier = Modifier.size(92.dp),
+                                modifier = Modifier.size(80.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 val progressFraction = if (batchState.totalFiles > 0) {

@@ -100,19 +100,17 @@ fun HomeDashboardScreen(
                 )
             ) {
                 Box(modifier = Modifier.fillMaxWidth()) {
-                    // Scenic Mountain + Radar Circle + Crosshair Artwork on the right side
+                    // Scenic Mountain + Radar Circle + Crosshair Artwork dynamically matching card size
                     MountainHeroArtwork(
                         isDark = isDark,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(if (isWide) 420.dp else 480.dp)
+                        modifier = Modifier.matchParentSize()
                     )
 
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 22.dp, vertical = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(20.dp)
+                            .padding(horizontal = if (isWide) 22.dp else 16.dp, vertical = 18.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         // Top Row: SubAI Brand Mark + Version Pill
                         Row(
@@ -138,7 +136,11 @@ fun HomeDashboardScreen(
 
                             Surface(
                                 shape = RoundedCornerShape(50),
-                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.78f),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                                border = BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                ),
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(50))
                                     .clickable { onOpenSettings() }
@@ -154,17 +156,15 @@ fun HomeDashboardScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(6.dp))
-
                         // Hero Headline & Subtitle
                         Column(
-                            modifier = Modifier.fillMaxWidth(if (isWide) 0.62f else 0.92f),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                            modifier = Modifier.fillMaxWidth(if (isWide) 0.62f else 0.95f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
                                 text = "SubAI\nExtractor & Merger",
-                                fontSize = if (isWide) 36.sp else 30.sp,
-                                lineHeight = if (isWide) 42.sp else 36.sp,
+                                fontSize = if (isWide) 36.sp else 28.sp,
+                                lineHeight = if (isWide) 42.sp else 34.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -176,9 +176,7 @@ fun HomeDashboardScreen(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        // 5 Feature Cards Row / Grid matching the reference design
+                        // 5 Feature Cards Row (Wide) or Responsive 2-Column Grid (Compact Portrait)
                         val featureItems = listOf(
                             HomeFeatureCardSpec(
                                 tabIndex = 0,
@@ -242,21 +240,51 @@ fun HomeDashboardScreen(
                                 }
                             }
                         } else {
-                            // Horizontal scroll + 2-column responsive option so all 5 cards look identical to the reference
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            // Responsive 2-Column Grid on Portrait Phones so all 5 cards fit cleanly without clipping
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                featureItems.forEach { spec ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
                                     HomeFeatureActionCard(
-                                        spec = spec,
+                                        spec = featureItems[0],
                                         isDark = isDark,
-                                        onClick = { onNavigateToTab(spec.tabIndex) },
-                                        modifier = Modifier.width(136.dp)
+                                        onClick = { onNavigateToTab(featureItems[0].tabIndex) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    HomeFeatureActionCard(
+                                        spec = featureItems[1],
+                                        isDark = isDark,
+                                        onClick = { onNavigateToTab(featureItems[1].tabIndex) },
+                                        modifier = Modifier.weight(1f)
                                     )
                                 }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    HomeFeatureActionCard(
+                                        spec = featureItems[2],
+                                        isDark = isDark,
+                                        onClick = { onNavigateToTab(featureItems[2].tabIndex) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    HomeFeatureActionCard(
+                                        spec = featureItems[3],
+                                        isDark = isDark,
+                                        onClick = { onNavigateToTab(featureItems[3].tabIndex) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                HomeFeatureActionCard(
+                                    spec = featureItems[4],
+                                    isDark = isDark,
+                                    onClick = { onNavigateToTab(featureItems[4].tabIndex) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             }
                         }
 
@@ -281,19 +309,19 @@ fun HomeDashboardScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Surface(
                                         shape = RoundedCornerShape(12.dp),
                                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        modifier = Modifier.size(44.dp)
+                                        modifier = Modifier.size(42.dp)
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
                                             Icon(
@@ -304,32 +332,32 @@ fun HomeDashboardScreen(
                                         }
                                     }
 
-                                    Column(modifier = Modifier.weight(1f)) {
+                                    Column(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(end = 8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
                                         Text(
                                             text = "File Terakhir",
-                                            style = MaterialTheme.typography.labelMedium,
+                                            style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            Text(
-                                                text = uiState.document.fileName,
-                                                style = MaterialTheme.typography.titleSmall,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(
-                                                text = "·  ${uiState.document.cues.size} dialog  ·  ${uiState.matchedCount} cocok",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
+                                        Text(
+                                            text = uiState.document.fileName,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "${uiState.document.cues.size} dialog  •  ${uiState.matchedCount} cocok",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                     }
                                 }
 

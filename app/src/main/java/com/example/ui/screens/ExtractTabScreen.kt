@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,14 +41,17 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.PlayCircleFilled
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -69,6 +73,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -76,8 +81,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -113,7 +120,7 @@ import com.example.viewmodel.SubtitleUiState
 import com.example.viewmodel.SubtitleViewModel
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ExtractTabScreen(
     uiState: SubtitleUiState,
@@ -126,18 +133,33 @@ fun ExtractTabScreen(
     modifier: Modifier = Modifier
 ) {
     val activeBatch = uiState.activeBatchCues
+    val allCues = uiState.document.cues
     val activeGlossaryCount = glossaryRules.count { it.isEnabled }
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val coroutineScope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
 
-    var selectedCueId by rememberSaveable(uiState.document.fileName, uiState.selectedBatchIndex) {
-        mutableIntStateOf(activeBatch.firstOrNull()?.id ?: 1)
+    // Allow viewing either all lines continuously (e.g. 1..300+) or filtered by active batch
+    var showAllCuesInList by rememberSaveable { mutableStateOf(true) }
+    val displayedCues = if (showAllCuesInList || uiState.batches.size <= 1) {
+        allCues
+    } else {
+        activeBatch
     }
-    val selectedCue = remember(activeBatch, selectedCueId) {
-        activeBatch.find { it.id == selectedCueId } ?: activeBatch.firstOrNull()
+
+    var selectedCueId by rememberSaveable(uiState.document.fileName) {
+        mutableIntStateOf(displayedCues.firstOrNull()?.id ?: 1)
+    }
+    val selectedCue = remember(displayedCues, allCues, selectedCueId) {
+        displayedCues.find { it.id == selectedCueId }
+            ?: allCues.find { it.id == selectedCueId }
+            ?: displayedCues.firstOrNull()
     }
 
     var showAiProviderSheet by rememberSaveable { mutableStateOf(false) }
     var showExtractionRulesSheet by rememberSaveable { mutableStateOf(false) }
+    var showJumpLineDialog by rememberSaveable { mutableStateOf(false) }
+    var jumpLineInput by rememberSaveable { mutableStateOf("") }
 
     val previewExtractedLines = remember(
         activeBatch,
@@ -155,6 +177,87 @@ fun ExtractTabScreen(
                 indexFormatMode = uiState.indexFormatMode
             )
         }
+    }
+
+    // Helper to jump to any cue ID (e.g. line 300) and scroll the LazyColumn directly to it
+    val jumpToCueId: (Int) -> Unit = { targetId ->
+        val clampedId = targetId.coerceIn(
+            allCues.firstOrNull()?.id ?: 1,
+            allCues.lastOrNull()?.id ?: 1
+        )
+        selectedCueId = clampedId
+        // Also sync batch index if batch contains this cue
+        val matchingBatchIndex = uiState.batches.indexOfFirst { batch ->
+            batch.any { it.id == clampedId }
+        }
+        if (matchingBatchIndex >= 0 && matchingBatchIndex != uiState.selectedBatchIndex) {
+            viewModel.selectBatchIndex(matchingBatchIndex)
+        }
+        val targetList = if (showAllCuesInList || uiState.batches.size <= 1) {
+            allCues
+        } else {
+            uiState.batches.getOrNull(matchingBatchIndex.coerceAtLeast(0)) ?: activeBatch
+        }
+        val targetIndex = targetList.indexOfFirst { it.id == clampedId }
+        if (targetIndex >= 0) {
+            coroutineScope.launch {
+                listState.animateScrollToItem(targetIndex)
+            }
+        }
+    }
+
+    if (showJumpLineDialog) {
+        val maxCueId = allCues.lastOrNull()?.id ?: allCues.size.coerceAtLeast(1)
+        AlertDialog(
+            onDismissRequest = { showJumpLineDialog = false },
+            title = {
+                Text(
+                    text = "Lompat ke Baris Subtitle",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Masukkan nomor baris (1 – $maxCueId) untuk langsung menuju dan mengedit baris tersebut tanpa perlu scroll manual:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = jumpLineInput,
+                        onValueChange = { input ->
+                            jumpLineInput = input.filter { it.isDigit() }
+                        },
+                        label = { Text("Nomor Baris (misal: 300)") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("jump_to_line_input")
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val parsed = jumpLineInput.toIntOrNull()
+                        if (parsed != null) {
+                            jumpToCueId(parsed)
+                        }
+                        showJumpLineDialog = false
+                    },
+                    modifier = Modifier.testTag("confirm_jump_to_line_button")
+                ) {
+                    Text("Lompat & Edit")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showJumpLineDialog = false }) {
+                    Text("Batal")
+                }
+            }
+        )
     }
 
     // Bottom Sheet 1: AI Provider, Cookie & Model Discovery
@@ -224,26 +327,34 @@ fun ExtractTabScreen(
         modifier = modifier
             .fillMaxSize()
             .imePadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Top Header & Pill Selectors Bar matching Panel 2 ("Ekstrak & Terjemahkan")
+        // Sticky Top Workspace Control Header (Fixed outside LazyColumn — never scrolls away!)
         ExtractWorkspaceTopBar(
             uiState = uiState,
             aiSettings = aiSettings,
+            selectedCueId = selectedCue?.id ?: 1,
+            showAllCuesInList = showAllCuesInList,
+            isWideScreen = isWideScreen,
             viewModel = viewModel,
             onOpenFilePicker = onOpenFilePicker,
             onOpenAiSettingsSheet = { showAiProviderSheet = true },
-            onOpenExtractionRulesSheet = { showExtractionRulesSheet = true }
+            onOpenExtractionRulesSheet = { showExtractionRulesSheet = true },
+            onOpenJumpLineDialog = {
+                jumpLineInput = (selectedCue?.id ?: 1).toString()
+                showJumpLineDialog = true
+            },
+            onToggleShowAllCues = { showAllCuesInList = it }
         )
 
         if (isWideScreen) {
-            // Split Master-Detail Layout matching Panel 2 of Reference Design
+            // Wide Screen Split Master-Detail Layout matching Panel 2 of Reference Design
             Row(
                 modifier = Modifier.fillMaxSize(),
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Left Pane: Scrollable 001, 002, 003 Cue List
+                // Left Pane: Scrollable 001..N Cue List
                 Card(
                     modifier = Modifier
                         .weight(0.46f)
@@ -258,12 +369,13 @@ fun ExtractTabScreen(
                     )
                 ) {
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(
-                            items = activeBatch,
+                            items = displayedCues,
                             key = { cue -> "extract_cue_${cue.id}" }
                         ) { cue ->
                             ExtractCueListItemCard(
@@ -279,7 +391,7 @@ fun ExtractTabScreen(
                     }
                 }
 
-                // Right Pane: Active Cue Inspector & Translation Card
+                // Right Pane: Stationary Active Cue Inspector & Translation Card
                 ActiveCueTranslationInspectorCard(
                     selectedCue = selectedCue,
                     uiState = uiState,
@@ -288,43 +400,68 @@ fun ExtractTabScreen(
                     isDark = isDark,
                     viewModel = viewModel,
                     onExpandRawSheet = { showExtractionRulesSheet = true },
+                    onStepCue = { delta ->
+                        val currentIdx = displayedCues.indexOfFirst { it.id == selectedCue?.id }
+                        if (currentIdx >= 0) {
+                            val nextCue = displayedCues.getOrNull(currentIdx + delta)
+                            if (nextCue != null) {
+                                jumpToCueId(nextCue.id)
+                            }
+                        }
+                    },
                     modifier = Modifier
                         .weight(0.54f)
                         .fillMaxHeight()
                 )
             }
         } else {
-            // Compact Portrait Layout: Active Cue Inspector on Top + Scrollable 001..N Cue List Below
+            // Compact Portrait Layout:
+            // Each selected subtitle cue card (#001, #050, #300...) expands INLINE right in place!
+            // Users NEVER have to scroll back to line #001 to edit line #300!
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(bottom = 20.dp)
+                contentPadding = PaddingValues(bottom = 24.dp)
             ) {
-                item(key = "mobile_inspector_card") {
-                    ActiveCueTranslationInspectorCard(
-                        selectedCue = selectedCue,
-                        uiState = uiState,
-                        aiSettings = aiSettings,
-                        activeGlossaryCount = activeGlossaryCount,
-                        isDark = isDark,
-                        viewModel = viewModel,
-                        onExpandRawSheet = { showExtractionRulesSheet = true },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
                 items(
-                    items = activeBatch,
+                    items = displayedCues,
                     key = { cue -> "extract_cue_${cue.id}" }
                 ) { cue ->
+                    val isCueSelected = selectedCue?.id == cue.id
                     ExtractCueListItemCard(
                         cue = cue,
-                        isSelected = selectedCue?.id == cue.id,
+                        isSelected = isCueSelected,
                         isTranslated = uiState.parsedTranslations.containsKey(cue.id),
                         isTranslating = cue.id in uiState.translatingCueIds,
                         translatedPreview = uiState.parsedTranslations[cue.id],
                         isDark = isDark,
-                        onClick = { selectedCueId = cue.id }
+                        onClick = { selectedCueId = cue.id },
+                        inlineEditorContent = if (isCueSelected) {
+                            {
+                                ActiveCueTranslationInspectorCard(
+                                    selectedCue = cue,
+                                    uiState = uiState,
+                                    aiSettings = aiSettings,
+                                    activeGlossaryCount = activeGlossaryCount,
+                                    isDark = isDark,
+                                    viewModel = viewModel,
+                                    onExpandRawSheet = { showExtractionRulesSheet = true },
+                                    onStepCue = { delta ->
+                                        val currentIdx = displayedCues.indexOfFirst { it.id == cue.id }
+                                        if (currentIdx >= 0) {
+                                            val nextCue = displayedCues.getOrNull(currentIdx + delta)
+                                            if (nextCue != null) {
+                                                jumpToCueId(nextCue.id)
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 8.dp)
+                                )
+                            }
+                        } else null
                     )
                 }
             }
@@ -332,14 +469,20 @@ fun ExtractTabScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ExtractWorkspaceTopBar(
     uiState: SubtitleUiState,
     aiSettings: AiProviderSettings,
+    selectedCueId: Int,
+    showAllCuesInList: Boolean,
+    isWideScreen: Boolean,
     viewModel: SubtitleViewModel,
     onOpenFilePicker: () -> Unit,
     onOpenAiSettingsSheet: () -> Unit,
-    onOpenExtractionRulesSheet: () -> Unit
+    onOpenExtractionRulesSheet: () -> Unit,
+    onOpenJumpLineDialog: () -> Unit,
+    onToggleShowAllCues: (Boolean) -> Unit
 ) {
     var showLanguageMenu by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
@@ -375,64 +518,106 @@ private fun ExtractWorkspaceTopBar(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = "Ekstrak & Terjemahkan",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            if (isWideScreen) {
+                // Only show large title & file chip inside workspace card on wide screens
+                // (On compact screens, MainActivity TopAppBar already displays the screen title & active file)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Ekstrak & Terjemahkan",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
 
-            // File Info + Language Pill + AI Provider Pill + More Menu
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onOpenFilePicker() }
+                            .testTag("open_subtitle_file_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Folder,
+                                contentDescription = "Buka File",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = uiState.document.fileName,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "· ${uiState.document.cues.size} dialog",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Responsive Control Pills Row: Language Pill + AI Provider Pill + Jump to #Line Pill + More Menu
+            // Never pushed off-screen by long filenames!
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // File Selector Chip
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onOpenFilePicker() }
-                        .testTag("open_subtitle_file_button")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Folder,
-                            contentDescription = "Buka File",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = uiState.document.fileName,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "·  ${uiState.document.cues.size} dialog",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(10.dp))
-
                 Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    if (!isWideScreen) {
+                        // Compact File Picker Pill with constrained width so it never pushes other pills off-screen
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable { onOpenFilePicker() }
+                                .testTag("open_subtitle_file_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Folder,
+                                    contentDescription = "Buka File",
+                                    modifier = Modifier.size(15.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "${uiState.document.cues.size} dlg",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+
                     // Target Language Dropdown Pill
                     Box {
                         Surface(
@@ -445,7 +630,7 @@ private fun ExtractWorkspaceTopBar(
                                 .testTag("target_language_pill_button")
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
@@ -463,7 +648,7 @@ private fun ExtractWorkspaceTopBar(
                                 Icon(
                                     imageVector = Icons.Default.KeyboardArrowDown,
                                     contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(15.dp)
                                 )
                             }
                         }
@@ -495,7 +680,7 @@ private fun ExtractWorkspaceTopBar(
                             .testTag("open_ai_settings_sheet_button")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
@@ -513,90 +698,137 @@ private fun ExtractWorkspaceTopBar(
                             Icon(
                                 imageVector = Icons.Default.KeyboardArrowDown,
                                 contentDescription = null,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(15.dp)
                             )
                         }
                     }
 
-                    // 3-Dots Overflow Button (Samples, Extraction Rules, Translate All Batches)
-                    Box {
-                        IconButton(
-                            onClick = { showMoreMenu = true },
-                            modifier = Modifier
-                                .size(34.dp)
-                                .testTag("open_extraction_rules_sheet_button")
+                    // Quick Jump to Line # Pill (e.g. jump directly to #300!)
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable { onOpenJumpLineDialog() }
+                            .testTag("jump_to_line_pill_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.MoreVert,
-                                contentDescription = "Opsi Ekstraksi & Sampel"
+                                imageVector = Icons.Default.Numbers,
+                                contentDescription = "Lompat ke Baris",
+                                modifier = Modifier.size(15.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Baris #${String.format(Locale.US, "%03d", selectedCueId)}",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
+                    }
+                }
 
-                        DropdownMenu(
-                            expanded = showMoreMenu,
-                            onDismissRequest = { showMoreMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Aturan Ekstraksi & Prompt AI") },
-                                leadingIcon = { Icon(Icons.Default.Security, contentDescription = null) },
-                                onClick = {
-                                    showMoreMenu = false
-                                    onOpenExtractionRulesSheet()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Konfigurasi AI Provider & Cookie") },
-                                leadingIcon = { Icon(Icons.Default.AutoAwesome, contentDescription = null) },
-                                onClick = {
-                                    showMoreMenu = false
-                                    onOpenAiSettingsSheet()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Muat Sampel .ASS Anime") },
-                                leadingIcon = { Icon(Icons.Default.AutoAwesome, contentDescription = null) },
-                                onClick = {
-                                    showMoreMenu = false
-                                    viewModel.loadSampleAss()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Muat Sampel .SRT Film") },
-                                leadingIcon = { Icon(Icons.Default.Movie, contentDescription = null) },
-                                onClick = {
-                                    showMoreMenu = false
-                                    viewModel.loadSampleSrt()
-                                }
-                            )
-                            if (allBatches.size > 1) {
-                                DropdownMenuItem(
-                                    text = { Text("Terjemahkan Semua Batch (${allBatches.size})") },
-                                    leadingIcon = { Icon(Icons.Default.PlayCircleFilled, contentDescription = null) },
-                                    onClick = {
-                                        showMoreMenu = false
-                                        viewModel.translateAllBatchesWithAi()
-                                    }
-                                )
+                // 3-Dots Overflow Button (Samples, Extraction Rules, Translate All Batches)
+                Box {
+                    IconButton(
+                        onClick = { showMoreMenu = true },
+                        modifier = Modifier
+                            .size(34.dp)
+                            .testTag("open_extraction_rules_sheet_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Opsi Ekstraksi & Sampel"
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = showMoreMenu,
+                        onDismissRequest = { showMoreMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Lompat ke Nomor Baris...") },
+                            leadingIcon = { Icon(Icons.Default.Numbers, contentDescription = null) },
+                            onClick = {
+                                showMoreMenu = false
+                                onOpenJumpLineDialog()
                             }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Aturan Ekstraksi & Prompt AI") },
+                            leadingIcon = { Icon(Icons.Default.Security, contentDescription = null) },
+                            onClick = {
+                                showMoreMenu = false
+                                onOpenExtractionRulesSheet()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Konfigurasi AI Provider & Cookie") },
+                            leadingIcon = { Icon(Icons.Default.AutoAwesome, contentDescription = null) },
+                            onClick = {
+                                showMoreMenu = false
+                                onOpenAiSettingsSheet()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Muat Sampel .ASS Anime") },
+                            leadingIcon = { Icon(Icons.Default.AutoAwesome, contentDescription = null) },
+                            onClick = {
+                                showMoreMenu = false
+                                viewModel.loadSampleAss()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Muat Sampel .SRT Film") },
+                            leadingIcon = { Icon(Icons.Default.Movie, contentDescription = null) },
+                            onClick = {
+                                showMoreMenu = false
+                                viewModel.loadSampleSrt()
+                            }
+                        )
+                        if (allBatches.size > 1) {
+                            DropdownMenuItem(
+                                text = { Text("Terjemahkan Semua Batch (${allBatches.size})") },
+                                leadingIcon = { Icon(Icons.Default.PlayCircleFilled, contentDescription = null) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    viewModel.translateAllBatchesWithAi()
+                                }
+                            )
                         }
                     }
                 }
             }
 
-            // Batch Selector Chips (when file has >1 batch)
+            // Batch Selector Chips (when file has >1 batch, plus "Semua Baris" option)
             if (allBatches.size > 1) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    FilterChip(
+                        selected = showAllCuesInList,
+                        onClick = { onToggleShowAllCues(true) },
+                        label = { Text("Semua (${uiState.document.cues.size})") },
+                        modifier = Modifier.testTag("batch_chip_all")
+                    )
                     allBatches.forEachIndexed { index, batchList ->
                         val bFirst = batchList.firstOrNull()?.id ?: 1
                         val bLast = batchList.lastOrNull()?.id ?: batchList.size
                         FilterChip(
-                            selected = uiState.selectedBatchIndex == index,
-                            onClick = { viewModel.selectBatchIndex(index) },
+                            selected = !showAllCuesInList && uiState.selectedBatchIndex == index,
+                            onClick = {
+                                onToggleShowAllCues(false)
+                                viewModel.selectBatchIndex(index)
+                            },
                             label = { Text("Batch ${index + 1} (#$bFirst–#$bLast)") },
                             modifier = Modifier.testTag("batch_chip_$index")
                         )
@@ -612,14 +844,16 @@ private fun ExtractWorkspaceTopBar(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
                             text = uiState.aiTranslationStatusText ?: "",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.testTag("ai_translation_status_text")
                         )
                         if (uiState.isTranslatingAi) {
@@ -645,7 +879,8 @@ private fun ExtractCueListItemCard(
     isTranslating: Boolean,
     translatedPreview: String?,
     isDark: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    inlineEditorContent: (@Composable () -> Unit)? = null
 ) {
     val bgColor = when {
         isSelected -> if (isDark) Color(0xFF214431) else SageHighlightFill
@@ -660,88 +895,98 @@ private fun ExtractCueListItemCard(
     }
 
     Surface(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(18.dp),
         color = bgColor,
         border = if (isSelected) {
-            BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
+            BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
         } else null,
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
             .testTag("realtime_cue_card_${cue.id}")
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
-            // 3-digit zero-padded index badge (001, 002, 003...)
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = indexBadgeBg
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    text = String.format(Locale.US, "%03d", cue.id),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-                )
-            }
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                // 3-digit zero-padded index badge (001, 002, 003...)
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = indexBadgeBg
                 ) {
                     Text(
-                        text = "${cue.startTime} → ${cue.endTime}",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = String.format(Locale.US, "%03d", cue.id),
+                        style = MaterialTheme.typography.labelLarge,
                         fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
                     )
-                    if (isTranslated) {
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary)
+                }
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${cue.startTime} → ${cue.endTime}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (isTranslated) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary)
+                            )
+                        }
+                    }
+
+                    val displayLine = cue.cleanText.replace("\\N", " ").replace("\n", " ")
+                    Text(
+                        text = displayLine,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = if (isSelected) 2 else 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    if (!translatedPreview.isNullOrBlank()) {
+                        Text(
+                            text = translatedPreview.replace("\\N", " "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = if (isSelected) 2 else 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
+            }
 
-                val displayLine = cue.cleanText.replace("\\N", " ").replace("\n", " ")
-                Text(
-                    text = displayLine,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                if (!translatedPreview.isNullOrBlank()) {
-                    Text(
-                        text = translatedPreview.replace("\\N", " "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+            // Inline Expandable Editor right inside the selected cue card on compact screens!
+            if (inlineEditorContent != null) {
+                inlineEditorContent()
             }
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ActiveCueTranslationInspectorCard(
     selectedCue: SubtitleCue?,
@@ -751,6 +996,7 @@ private fun ActiveCueTranslationInspectorCard(
     isDark: Boolean,
     viewModel: SubtitleViewModel,
     onExpandRawSheet: () -> Unit,
+    onStepCue: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -769,7 +1015,7 @@ private fun ActiveCueTranslationInspectorCard(
 
     Card(
         modifier = modifier.testTag("active_cue_inspector_card"),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
@@ -781,10 +1027,10 @@ private fun ActiveCueTranslationInspectorCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Top Underline Tab Bar: Teks Asli | Terjemahan + Expand button
+            // Top Underline Tab Bar: Teks Asli | Terjemahan + Prev/Next Line + Expand button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -808,14 +1054,39 @@ private fun ActiveCueTranslationInspectorCard(
                     )
                 }
 
+                if (onStepCue != null) {
+                    IconButton(
+                        onClick = { onStepCue(-1) },
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowUp,
+                            contentDescription = "Baris Sebelumnya",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(
+                        onClick = { onStepCue(1) },
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Baris Berikutnya",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
                 IconButton(
                     onClick = onExpandRawSheet,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(30.dp)
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.OpenInNew,
                         contentDescription = "Lihat Pratinjau Batch & Prompt",
-                        modifier = Modifier.size(18.dp),
+                        modifier = Modifier.size(17.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -824,23 +1095,38 @@ private fun ActiveCueTranslationInspectorCard(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
 
             if (selectedCue != null) {
-                // Original Dialogue Header
-                Text(
-                    text = selectedCue.cleanText.replace("\\N", "\n"),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                // Original Dialogue Header with Line Number Badge
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        text = selectedCue.cleanText.replace("\\N", "\n"),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "#${String.format(Locale.US, "%03d", selectedCue.id)}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
 
                 if (inspectorTab == 0) {
                     // Teks Asli Metadata & Raw Tag View
                     Surface(
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(14.dp),
                         color = if (isDark) Color(0xFF1B2E24) else SageSoftCardFill,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
-                            modifier = Modifier.padding(14.dp),
+                            modifier = Modifier.padding(12.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
@@ -872,14 +1158,14 @@ private fun ActiveCueTranslationInspectorCard(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                             )
                         },
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(14.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedContainerColor = if (isDark) Color(0xFF1B2E24) else SageSoftCardFill,
                             unfocusedContainerColor = if (isDark) Color(0xFF1B2E24) else SageSoftCardFill,
                             focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
                             unfocusedBorderColor = Color.Transparent
                         ),
-                        minLines = 3,
+                        minLines = 2,
                         maxLines = 5,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -889,10 +1175,10 @@ private fun ActiveCueTranslationInspectorCard(
             }
 
             // Bottom Action Row inside Inspector: [Edit] [Copy] [Check]  ...  [✨ Terjemahkan AI]
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -966,7 +1252,7 @@ private fun ActiveCueTranslationInspectorCard(
                             containerColor = MaterialTheme.colorScheme.error,
                             contentColor = MaterialTheme.colorScheme.onError
                         ),
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
                         modifier = Modifier.testTag("stop_ai_translation_button")
                     ) {
                         Icon(
@@ -974,7 +1260,7 @@ private fun ActiveCueTranslationInspectorCard(
                             contentDescription = null,
                             modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Hentikan",
                             fontWeight = FontWeight.SemiBold
@@ -988,7 +1274,7 @@ private fun ActiveCueTranslationInspectorCard(
                             containerColor = if (isDark) MaterialTheme.colorScheme.primary else ForestGreenPrimary,
                             contentColor = if (isDark) MaterialTheme.colorScheme.onPrimary else Color.White
                         ),
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
                         modifier = Modifier.testTag("translate_active_batch_ai_button")
                     ) {
                         Icon(
@@ -996,7 +1282,7 @@ private fun ActiveCueTranslationInspectorCard(
                             contentDescription = null,
                             modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Terjemahkan AI",
                             fontWeight = FontWeight.SemiBold
