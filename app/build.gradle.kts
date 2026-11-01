@@ -1,4 +1,19 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Properties
+
+val versionPropsFile = rootProject.file("version.properties")
+val versionProps = Properties().apply {
+  if (versionPropsFile.exists()) {
+    versionPropsFile.inputStream().use { load(it) }
+  }
+}
+val verMajor = versionProps.getProperty("VERSION_MAJOR", "1").toIntOrNull() ?: 1
+val verMinor = versionProps.getProperty("VERSION_MINOR", "1").toIntOrNull() ?: 1
+val verPatch = versionProps.getProperty("VERSION_PATCH", "0").toIntOrNull() ?: 0
+val verCode = versionProps.getProperty("VERSION_CODE", "2").toIntOrNull() ?: 2
+val verName = "$verMajor.$verMinor.$verPatch"
+val githubRepoOwner = versionProps.getProperty("GITHUB_REPO_OWNER", "EkoSaputro14")
+val githubRepoName = versionProps.getProperty("GITHUB_REPO_NAME", "subai-extractor-merger")
 
 plugins {
   alias(libs.plugins.android.application)
@@ -16,8 +31,11 @@ android {
     applicationId = "com.aistudio.subaiextractor.qrzvkm"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = verCode
+    versionName = verName
+
+    buildConfigField("String", "GITHUB_REPO_OWNER", "\"$githubRepoOwner\"")
+    buildConfigField("String", "GITHUB_REPO_NAME", "\"$githubRepoName\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

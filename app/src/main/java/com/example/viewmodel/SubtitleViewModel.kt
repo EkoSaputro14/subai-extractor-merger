@@ -5,7 +5,10 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.BuildConfig
 import com.example.data.AndroidBatchOutputWriter
+import com.example.data.AppUpdateChecker
+import com.example.data.AppUpdateUiState
 import com.example.data.BatchNotificationHelper
 import com.example.data.GeminiWebCookieClient
 import com.example.data.OpenAiCompatibleClient
@@ -146,6 +149,16 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
 
     private val _batchQueueState = MutableStateFlow(loadAndRecoverInitialBatchQueueState())
     val batchQueueState: StateFlow<BatchQueueState> = _batchQueueState.asStateFlow()
+
+    private val _appUpdateState = MutableStateFlow(
+        AppUpdateUiState(
+            currentVersionName = BuildConfig.VERSION_NAME,
+            currentVersionCode = BuildConfig.VERSION_CODE,
+            repoOwner = BuildConfig.GITHUB_REPO_OWNER,
+            repoName = BuildConfig.GITHUB_REPO_NAME
+        )
+    )
+    val appUpdateState: StateFlow<AppUpdateUiState> = _appUpdateState.asStateFlow()
 
     private var activeTranslationJob: Job? = null
     private var activeBatchQueueJob: Job? = null
@@ -1662,4 +1675,129 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
             }
         }
     }
+
+    // --- App Version & GitHub Release Update Checker ---
+
+    fun checkAppUpdate() {
+        val currentState = _appUpdateState.value
+        if (currentState.isChecking) return
+
+        _appUpdateState.update {
+            it.copy(
+                isChecking = true,
+                errorMessage = null,
+                statusMessage = "Memeriksa rilis terbaru di GitHub (${it.repoOwner}/${it.repoName})..."
+            )
+        }
+
+        viewModelScope.launch {
+            val result = AppUpdateChecker.checkLatestRelease(
+                owner = currentState.repoOwner,
+                repo = currentState.repoName,
+                currentVersionName = currentState.currentVersionName
+            )
+            result.fold(
+                onSuccess = { (hasNewer, releaseInfo) ->
+                    val statusMsg = if (hasNewer) {
+                        "Tersedia versi baru v${releaseInfo.versionName} (${releaseInfo.releaseTitle})!"
+                    } else {
+                        "Aplikasi Anda sudah menggunakan versi terbaru (v${currentState.currentVersionName})."
+                    }
+                    _appUpdateState.update {
+                        it.copy(
+                            isChecking = false,
+                            isUpdateAvailable = hasNewer,
+                            latestRelease = releaseInfo,
+                            statusMessage = statusMsg,
+                            errorMessage = null
+                        )
+                    }
+                },
+                onFailure = { err ->
+                    _appUpdateState.update {
+                        it.copy(
+                            isChecking = false,
+                            errorMessage = err.message ?: "Gagal memeriksa pembaruan dari GitHub Releases.",
+                            statusMessage = null
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun downloadLatestUpdateApk() {
+        val context = getApplication<Application>().applicationContext
+        val state = _appUpdateState.value
+        val release = state.latestRelease ?: return
+        val apkAsset = release.apkAsset
+
+        if (apkAsset == null || apkAsset.downloadUrl.isBlank()) {
+            if (release.htmlUrl.isNotBlank()) {
+                AppUpdateChecker.openUrlInBrowser(context, release.htmlUrl)
+            }
+            _appUpdateState.update {
+                it.copy(
+                    statusMessage = "Membuka halaman rilis GitHub di browser untuk mengunduh APK."
+                )
+            }
+            return
+        }
+
+        _appUpdateState.update {
+            it.copy(
+                isDownloadingApk = true,
+                errorMessage = null,
+                statusMessage = "Memulai unduhan ${apkAsset.name} (${apkAsset.formattedSizeMb})..."
+            )
+        }
+
+        val enqueueResult = AppUpdateChecker.enqueueApkDownload(
+            context = context,
+            asset = apkAsset,
+            versionTag = release.tagName
+        )
+
+        enqueueResult.fold(
+            onSuccess = { (downloadId, fileName) ->
+                _appUpdateState.update {
+                    it.copy(
+                        isDownloadingApk = false,
+                        lastDownloadId = downloadId,
+                        downloadedFileName = fileName,
+                        statusMessage = "Mengunduh $fileName ke folder Downloads! Cek notifikasi sistem untuk memasang APK setelah selesai."
+                    )
+                }
+                _uiState.update {
+                    it.copy(
+                        lastActionBannerMessage = "Unduhan $fileName dimulai di DownloadManager!"
+                    )
+                }
+            },
+            onFailure = { err ->
+                // Fallback to direct browser download if DownloadManager is restricted
+                val opened = AppUpdateChecker.openUrlInBrowser(context, apkAsset.downloadUrl)
+                _appUpdateState.update {
+                    it.copy(
+                        isDownloadingApk = false,
+                        statusMessage = if (opened) {
+                            "Mengunduh ${apkAsset.name} melalui browser perangkat..."
+                        } else null,
+                        errorMessage = if (!opened) {
+                            "Gagal memulai unduhan: ${err.message}"
+                        } else null
+                    )
+                }
+            }
+        )
+    }
+
+    fun openLatestReleaseInBrowser() {
+        val context = getApplication<Application>().applicationContext
+        val state = _appUpdateState.value
+        val targetUrl = state.latestRelease?.htmlUrl?.takeIf { it.isNotBlank() }
+            ?: "https://github.com/${state.repoOwner}/${state.repoName}/releases"
+        AppUpdateChecker.openUrlInBrowser(context, targetUrl)
+    }
 }
+

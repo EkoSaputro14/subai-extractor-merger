@@ -111,8 +111,21 @@ Setiap file wajib melewati pemeriksaan struktur dan kelengkapan sebelum statusny
 
 ## 10. Cara Menjalankan Pengujian Otomatis
 
-Jalankan seluruh pengujian unit dan Robolectric (termasuk **Test A s/d Test O** pada `BatchTranslationQueueTest`) melalui perintah Gradle berikut:
+Jalankan seluruh pengujian unit dan Robolectric (termasuk **Test A s/d Test O** pada `BatchTranslationQueueTest` dan `AppUpdateCheckerTest`) melalui perintah Gradle berikut:
 
 ```bash
 gradle :app:testDebugUnitTest
 ```
+
+---
+
+## 11. Sistem Versioning Otomatis, GitHub Releases, & Cek Pembaruan di Aplikasi
+
+- **Konfigurasi Semantic Versioning (`version.properties`)**:
+  - Versi aplikasi dikelola secara terpusat di file `version.properties` (`VERSION_MAJOR`, `VERSION_MINOR`, `VERSION_PATCH`, dan `VERSION_CODE`), dimulai dari **v1.1.0 (Build 2)**.
+  - Setiap penambahan fitur baru menaikkan versi *MINOR* (mis. `v1.1.0` -> `v1.2.0`), dan setiap perbaikan bug menaikkan versi *PATCH* (mis. `v1.1.0` -> `v1.1.1`) beserta `VERSION_CODE`.
+- **Badge Versi Asli & Pemeriksa Pembaruan di Pengaturan (`ThemeSettingsSheet`)**:
+  - Buka ikon **Pengaturan & Tema** di pojok kanan atas aplikasi untuk melihat badge versi aktif (`v1.1.0 (Build 2)`).
+  - Klik **Cek Versi Terbaru** untuk memeriksa rilis terbaru secara langsung dari GitHub Releases (`EkoSaputro14/subai-extractor-merger`).
+  - Jika tersedia versi yang lebih baru, pengguna dapat langsung menekan tombol **Download APK Terbaru** untuk mengunduh file `.apk` siap pasang melalui Android `DownloadManager`.
+
