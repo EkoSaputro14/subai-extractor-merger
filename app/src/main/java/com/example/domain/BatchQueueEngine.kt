@@ -36,7 +36,8 @@ fun interface BatchCueTranslator {
  */
 data class BatchTranslationAttemptOutput(
     val translatedCues: Map<Int, String>,
-    val customMergedContent: String? = null
+    val customMergedContent: String? = null,
+    val pipelineReport: SingleTranslationPipelineExecutionReport? = null
 )
 
 /**
@@ -515,11 +516,12 @@ object BatchQueueEngine {
         initialState: BatchQueueState,
         translator: BatchCueTranslator,
         outputWriter: BatchOutputFileWriter,
-        glossaryRules: List<GlossaryRule> = emptyList(),
-        protectAssStructuralTags: Boolean = true,
-        sourceLanguage: String = "Auto",
-        targetLanguage: String = "Indonesian (Bahasa Indonesia)",
-        checkUntranslatedSourceLeakage: Boolean = true,
+        translationConfig: SingleTranslationConfig? = null,
+        glossaryRules: List<GlossaryRule> = translationConfig?.glossaryRules ?: emptyList(),
+        protectAssStructuralTags: Boolean = translationConfig?.restoreLeadingAssTags ?: true,
+        sourceLanguage: String = translationConfig?.sourceLanguage ?: "Auto",
+        targetLanguage: String = translationConfig?.effectiveTargetLanguageLabel ?: "Indonesian (Bahasa Indonesia)",
+        checkUntranslatedSourceLeakage: Boolean = translationConfig?.checkUntranslatedSourceLeakage ?: true,
         shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
         clockMs: () -> Long = { System.currentTimeMillis() },
@@ -573,6 +575,7 @@ object BatchQueueEngine {
                 jobId = nextJob.jobId,
                 translator = translator,
                 outputWriter = outputWriter,
+                translationConfig = translationConfig,
                 glossaryRules = glossaryRules,
                 protectAssStructuralTags = protectAssStructuralTags,
                 sourceLanguage = sourceLanguage,
@@ -603,21 +606,23 @@ object BatchQueueEngine {
     }
 
     /**
-     * Processes a single attempt for [jobId].
-     * Always parses from `job.rawSourceContent` (never from a corrupted or failed output).
-     * If `job.validTranslatedCues` has previously validated cues, only requests translation for
-     * the missing/failed cues (targeted repair), then validates the full merged document.
+     * Processes a single attempt for [jobId] using the shared [SingleTranslationPipeline].
+     * - Always parses from `job.rawSourceContent` (never from a corrupted or failed output).
+     * - Always translates from the full `sourceDocument.cues` so every retry preserves full
+     *   chunking and dialogue context identically to Single Translation.
+     * - Reconstructs and validates the subtitle using the exact [SingleTranslationConfig] rules.
      */
     suspend fun processSingleJobAttempt(
         currentState: BatchQueueState,
         jobId: String,
         translator: BatchCueTranslator,
         outputWriter: BatchOutputFileWriter,
-        glossaryRules: List<GlossaryRule> = emptyList(),
-        protectAssStructuralTags: Boolean = true,
-        sourceLanguage: String = "Auto",
-        targetLanguage: String = "Indonesian (Bahasa Indonesia)",
-        checkUntranslatedSourceLeakage: Boolean = true,
+        translationConfig: SingleTranslationConfig? = null,
+        glossaryRules: List<GlossaryRule> = translationConfig?.glossaryRules ?: emptyList(),
+        protectAssStructuralTags: Boolean = translationConfig?.restoreLeadingAssTags ?: true,
+        sourceLanguage: String = translationConfig?.sourceLanguage ?: "Auto",
+        targetLanguage: String = translationConfig?.effectiveTargetLanguageLabel ?: "Indonesian (Bahasa Indonesia)",
+        checkUntranslatedSourceLeakage: Boolean = translationConfig?.checkUntranslatedSourceLeakage ?: true,
         shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
         clockMs: () -> Long = { System.currentTimeMillis() },
@@ -627,12 +632,21 @@ object BatchQueueEngine {
         val newAttemptNumber = targetJob.attemptCount + 1
         val attemptStartMs = clockMs()
 
+        val effectiveConfig = (translationConfig ?: SingleTranslationConfig()).copy(
+            glossaryRules = glossaryRules,
+            autoApplyGlossaryBeforeMerge = translationConfig?.autoApplyGlossaryBeforeMerge
+                ?: glossaryRules.isNotEmpty(),
+            restoreLeadingAssTags = protectAssStructuralTags,
+            sourceLanguage = sourceLanguage,
+            checkUntranslatedSourceLeakage = checkUntranslatedSourceLeakage
+        )
+
         // 1. Mark job as PROCESSING
         val processingJob = targetJob.copy(
             status = BatchJobStatus.PROCESSING,
             attemptCount = newAttemptNumber,
             startedAtMs = targetJob.startedAtMs ?: attemptStartMs,
-            translatedCuesProgress = targetJob.validTranslatedCues.size
+            translatedCuesProgress = 0
         )
         var state = updateJobInState(currentState, processingJob).copy(
             currentJobId = jobId,
@@ -646,27 +660,22 @@ object BatchQueueEngine {
             rawContent = processingJob.rawSourceContent
         )
 
-        // Determine which cues need translation on this attempt (Targeted Repair on retry)
-        val cuesToTranslate = if (processingJob.validTranslatedCues.isEmpty()) {
-            sourceDocument.cues
-        } else {
-            sourceDocument.cues.filter { cue -> !processingJob.validTranslatedCues.containsKey(cue.id) }
-                .ifEmpty { sourceDocument.cues }
-        }
+        // Always pass the full original sourceDocument.cues so retries run the complete Single Translation Pipeline
+        // from the original source file with full chunk context (never translating isolated/broken fragments).
+        val cuesToTranslate = sourceDocument.cues
 
-        // 2. Invoke translator
+        // 2. Invoke Single Translation Pipeline via translator
         val translationResult = translator.translateCues(
             job = processingJob,
             sourceDocument = sourceDocument,
             cuesToTranslate = cuesToTranslate,
-            onCueProgress = { translatedDelta ->
-                val totalDone = (processingJob.validTranslatedCues.size + translatedDelta)
-                    .coerceIn(0, sourceDocument.cues.size)
+            onCueProgress = { translatedSoFar ->
+                val totalDone = translatedSoFar.coerceIn(0, sourceDocument.cues.size)
                 val updatedJob = processingJob.copy(translatedCuesProgress = totalDone)
                 state = updateJobInState(state, updatedJob)
                 onStateChanged(state)
             }
-        )
+        ).flattenNestedResult()
 
         // Check if cancelled or paused during translation
         if (shouldCancel()) {
@@ -694,16 +703,14 @@ object BatchQueueEngine {
                 failureType = BatchFailureType.INFRASTRUCTURE_ERROR,
                 reason = errorMsg,
                 validationResult = null,
-                newlyValidCues = processingJob.validTranslatedCues,
+                newlyValidCues = emptyMap(),
                 nowMs = clockMs(),
                 onStateChanged = onStateChanged
             )
         }
 
         val attemptOutput = translationResult.getOrThrow()
-        // Combine previously valid cues with newly translated cues
         val combinedTranslatedMap = LinkedHashMap<Int, String>().apply {
-            putAll(processingJob.validTranslatedCues)
             putAll(attemptOutput.translatedCues)
         }
 
@@ -717,49 +724,33 @@ object BatchQueueEngine {
         )
         onStateChanged(state)
 
-        // Apply glossary rules if any before generating merged subtitle content
-        val finalTranslationsForMerge = if (glossaryRules.isNotEmpty()) {
-            SubtitleParserAndMerger.applyGlossaryRulesToTranslations(
-                combinedTranslatedMap,
-                glossaryRules
-            ).first
-        } else {
-            combinedTranslatedMap
-        }
+        // Apply post-processing glossary rules identically to Single Translation
+        val finalTranslationsForMerge = SingleTranslationPipeline.applyPostProcessing(
+            rawTranslations = combinedTranslatedMap,
+            config = effectiveConfig
+        )
 
-        // Generate merged subtitle content (unless customMergedContent was supplied by test)
+        // Generate merged subtitle content using SingleTranslationPipeline.reconstructMergedContent
+        // (unless customMergedContent was explicitly supplied by a unit test testing corrupted timestamps)
         val mergedContent = attemptOutput.customMergedContent
-            ?: SubtitleParserAndMerger.generateMergedFileContent(
+            ?: SingleTranslationPipeline.reconstructMergedContent(
                 document = sourceDocument,
                 translations = finalTranslationsForMerge,
-                separatorMode = com.example.model.LineSeparatorMode.DOUBLE_SLASH,
-                customSeparator = " // ",
-                restoreLeadingAssTags = protectAssStructuralTags,
-                bilingualMode = false,
-                bilingualOrder = com.example.model.BilingualOrder.TRANSLATION_TOP,
-                bilingualAssSecondaryStyling = false
+                config = effectiveConfig
             )
 
-        // 4. Run structural & completeness validation
+        // 4. Run structural & completeness validation matching Single Translation criteria
         val validation = BatchTranslationValidator.validateSubtitleTranslation(
             sourceDocument = sourceDocument,
             translatedMap = finalTranslationsForMerge,
             mergedFileContent = mergedContent,
             sourceLanguage = sourceLanguage,
             targetLanguage = targetLanguage,
-            checkUntranslatedSourceLeakage = checkUntranslatedSourceLeakage
+            checkUntranslatedSourceLeakage = checkUntranslatedSourceLeakage,
+            expectLeadingAssTagsRestored = effectiveConfig.restoreLeadingAssTags
         )
 
         if (!validation.isValid) {
-            // Preserve only the cues that passed individual checks for targeted repair on the next retry
-            val failedIds = validation.failedCueIds
-            val validSubset = if (validation.structureErrors.isEmpty()) {
-                combinedTranslatedMap.filterKeys { id -> id !in failedIds && id in sourceDocument.cues.map { it.id } }
-            } else {
-                // If file structure/headers were corrupted, re-translate cleanly from source on next attempt
-                emptyMap()
-            }
-
             return handleFailedAttemptAndRequeueAtEnd(
                 state = state,
                 job = validatingJob,
@@ -767,7 +758,7 @@ object BatchQueueEngine {
                 failureType = BatchFailureType.VALIDATION_FAILED,
                 reason = validation.summaryMessage,
                 validationResult = validation,
-                newlyValidCues = validSubset,
+                newlyValidCues = emptyMap(),
                 nowMs = clockMs(),
                 onStateChanged = onStateChanged
             )

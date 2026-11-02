@@ -31,6 +31,19 @@ object BatchTranslationValidator {
         """^[\d\s\p{Punct}♪♫…—–\-+*/=<>@#$%^&()\[\]{}|\\:;'".,?!~`]+$"""
     )
 
+    private val SOURCE_SENTENCE_STOP_WORDS = setOf(
+        "the", "have", "has", "had", "you", "your", "are", "were", "was", "will", "would",
+        "could", "should", "shall", "from", "with", "without", "around", "between", "through",
+        "because", "before", "after", "while", "where", "when", "what", "which", "whose",
+        "their", "there", "these", "those", "about", "into", "onto", "upon", "cannot", "didn't",
+        "don't", "doesn't", "won't", "isn't", "aren't", "wasn't", "weren't", "haven't", "hasn't"
+    )
+
+    fun isNonTranslatableSymbolOrNumberCue(text: String): Boolean {
+        val norm = normalizeForComparison(text)
+        return norm.isEmpty() || NON_TRANSLATABLE_OR_SHORT_PROPER_NOUN_REGEX.matches(norm)
+    }
+
     /**
      * Validates both the in-memory translated cue map and the reconstructed merged file content
      * against the original source [SubtitleDocument].
@@ -40,7 +53,7 @@ object BatchTranslationValidator {
      * 2. Are any entries missing?
      * 3. Are there empty blocks or truncated translations?
      * 4. Are there texts that should have been translated but remained identical to the source language
-     *    (while tolerating short proper nouns, numbers, punctuation, or non-translatable tokens)?
+     *    (while tolerating proper nouns, romaji spell/attack titles, numbers, punctuation, or non-translatable tokens)?
      * 5. Are all timestamps valid and preserved?
      * 6. Is the subtitle sequence order intact?
      * 7. Is the output file structure valid when re-parsed (including headers and ASS styling tags)?
@@ -52,7 +65,8 @@ object BatchTranslationValidator {
         mergedFileContent: String,
         sourceLanguage: String = "Auto",
         targetLanguage: String = "Indonesian (Bahasa Indonesia)",
-        checkUntranslatedSourceLeakage: Boolean = true
+        checkUntranslatedSourceLeakage: Boolean = true,
+        expectLeadingAssTagsRestored: Boolean = true
     ): BatchValidationResult {
         val totalSourceCues = sourceDocument.cues.size
         if (totalSourceCues == 0) {
@@ -78,7 +92,7 @@ object BatchTranslationValidator {
 
         val missingCueIds = mutableListOf<Int>()
         val emptyOrTruncatedCueIds = mutableListOf<Int>()
-        val untranslatedCueIds = mutableListOf<Int>()
+        val candidateUntranslatedCueIds = mutableListOf<Int>()
         val invalidTimestampCueIds = mutableListOf<Int>()
         val outOfOrderCueIds = mutableListOf<Int>()
         val structureErrors = mutableListOf<String>()
@@ -86,6 +100,8 @@ object BatchTranslationValidator {
         val sameLanguageRequested = sourceLanguage.isNotBlank() &&
             !sourceLanguage.equals("Auto", ignoreCase = true) &&
             targetLanguage.contains(sourceLanguage.trim(), ignoreCase = true)
+
+        var activelyChangedCueCount = 0
 
         // 1. Inspect every cue in sourceDocument against translatedMap
         for (sourceCue in sourceDocument.cues) {
@@ -113,12 +129,34 @@ object BatchTranslationValidator {
                 continue
             }
 
-            // Check for untranslated source-language leakage (excluding short proper nouns/numbers/symbols)
+            val normSrc = normalizeForComparison(sourceCue.cleanText)
+            val normDst = normalizeForComparison(cleanedTranslation)
+            if (normSrc != normDst) {
+                activelyChangedCueCount++
+            }
+
+            // Check for untranslated source-language leakage (excluding proper nouns/titles/romaji/numbers/symbols)
             if (checkUntranslatedSourceLeakage && !sameLanguageRequested) {
                 if (isLikelyUntranslatedSourceText(sourceCue.cleanText, cleanedTranslation)) {
-                    untranslatedCueIds.add(cueId)
+                    candidateUntranslatedCueIds.add(cueId)
                 }
             }
+        }
+
+        // Align with Single Translation behavior: if the document has >= 6 cues and >= 80% of cues were
+        // actively translated, only flag untranslated cues if they contain explicit source-sentence stop-words
+        // or CJK scripts (so romaji chants, loanwords, or attack names in a 200-line anime episode never cause false failure).
+        val untranslatedCueIds = if (totalSourceCues >= 6 &&
+            activelyChangedCueCount.toDouble() / totalSourceCues.toDouble() >= 0.80 &&
+            candidateUntranslatedCueIds.size.toDouble() / totalSourceCues.toDouble() <= 0.20
+        ) {
+            val cueById = sourceDocument.cues.associateBy { it.id }
+            candidateUntranslatedCueIds.filter { id ->
+                val text = cueById[id]?.cleanText.orEmpty()
+                hasExplicitSourceGrammarOrCjkScript(text)
+            }
+        } else {
+            candidateUntranslatedCueIds
         }
 
         // 2. Structural & Format header checks on mergedFileContent
@@ -181,8 +219,9 @@ object BatchTranslationValidator {
                 invalidTimestampCueIds.add(srcCue.id)
             }
 
-            // ASS leading override tag check (when source has leadingAssTags and merged output lost them)
-            if ((sourceDocument.format == SubtitleFormat.ASS || sourceDocument.format == SubtitleFormat.SSA) &&
+            // ASS leading override tag check (only when expectLeadingAssTagsRestored is enabled)
+            if (expectLeadingAssTagsRestored &&
+                (sourceDocument.format == SubtitleFormat.ASS || sourceDocument.format == SubtitleFormat.SSA) &&
                 srcCue.leadingAssTags.isNotEmpty()
             ) {
                 if (!outCue.rawText.startsWith(srcCue.leadingAssTags)) {
@@ -281,7 +320,8 @@ object BatchTranslationValidator {
 
     /**
      * Detects whether a subtitle cue was left untranslated in the source language, while
-     * allowing proper nouns, short interjections ("OK", "Ah!", "Hmm"), numbers, and symbols.
+     * allowing proper nouns, Title-Case spell/attack/episode names (e.g. "Zettai Kansei Kisei Jijitsu!"),
+     * repeated chants/interjections ("Shichae! Shichae!", "OK", "Ah!", "Hmm"), numbers, and symbols.
      */
     internal fun isLikelyUntranslatedSourceText(sourceText: String, translatedText: String): Boolean {
         val normSource = normalizeForComparison(sourceText)
@@ -296,32 +336,54 @@ object BatchTranslationValidator {
         }
 
         val words = normSource.split(Regex("""\s+""")).filter { it.isNotBlank() }
+        val cleanedLowerWords = words.map {
+            it.lowercase().trim { ch -> !ch.isLetterOrDigit() && ch != '\'' }
+        }.filter { it.isNotEmpty() }
+
         // Single short word or universal interjection (e.g., "OK", "Okay", "Hmm", "Ah", "Oh", "Ha ha", "Naomi", "Tokyo")
         val universalInterjections = setOf(
-            "ok", "okay", "hmm", "hm", "ah", "oh", "eh", "uh", "huh", "wow", "hey", "hi", "halo", "haha", "hahaha"
+            "ok", "okay", "hmm", "hm", "ah", "oh", "eh", "uh", "huh", "wow", "hey", "hi", "halo",
+            "haha", "hahaha", "oi", "nee", "ano", "etto", "ara", "ufufu", "ora", "muda"
         )
-        if (words.all { it.lowercase().trimEnd('.', '!', '?', ',') in universalInterjections }) {
+        if (cleanedLowerWords.all { it in universalInterjections }) {
             return false
         }
 
-        // Allow 1-2 capitalized proper nouns (e.g. "Tanaka-san!", "John Smith", "New York")
-        if (words.size <= 2 && words.all { word ->
-                val stripped = word.trim { !it.isLetterOrDigit() }
-                stripped.isEmpty() || stripped[0].isUpperCase() || stripped.length <= 3
-            }
-        ) {
+        // Repeated chant or exclamation with <= 2 distinct words (e.g. "Shichae! Shichae! Shichae!", "Wait, wait, wait!")
+        if (cleanedLowerWords.distinct().size <= 2 && cleanedLowerWords.none { it in SOURCE_SENTENCE_STOP_WORDS }) {
             return false
         }
 
-        // If the sentence has >= 3 words (or >= 12 alphabetic characters with non-capitalized words)
-        // and is 100% identical to the source text, it was left untranslated.
-        val alphaCount = normSource.count { it.isLetter() }
-        val nonAsciiLetterCount = normSource.count { it.isLetter() && it.code > 127 }
-        if (nonAsciiLetterCount >= 2) {
-            // Non-ASCII scripts (Japanese, Korean, Chinese, Cyrillic, Arabic, etc.) left identical
+        // Title-Case / Capitalized Proper Noun / Spell / Attack / Title phrases of ANY length
+        // (e.g., "Zettai Kansei Kisei Jijitsu!", "Grand Magic Games", "Tokyo Jujutsu High")
+        // as long as they don't contain untranslated English sentence stop-words.
+        val isTitleOrProperNounPhrase = words.all { word ->
+            val stripped = word.trim { !it.isLetterOrDigit() }
+            stripped.isEmpty() || stripped[0].isUpperCase() || stripped.length <= 3
+        } && cleanedLowerWords.none { it in SOURCE_SENTENCE_STOP_WORDS }
+        if (isTitleOrProperNounPhrase) {
+            return false
+        }
+
+        // CJK / Non-Latin scripts (Japanese Kanji/Kana, Korean Hangul, Chinese, Cyrillic, Arabic) left identical
+        val cjkOrNonLatinCount = normSource.count { it.isLetter() && it.code > 0x024F }
+        if (cjkOrNonLatinCount >= 2) {
             return true
         }
+
+        // If the sentence has >= 3 words and >= 10 alphabetic characters, check if it looks like an untranslated sentence
+        val alphaCount = normSource.count { it.isLetter() }
         return words.size >= 3 && alphaCount >= 10
+    }
+
+    private fun hasExplicitSourceGrammarOrCjkScript(sourceText: String): Boolean {
+        val norm = normalizeForComparison(sourceText)
+        val cjkOrNonLatinCount = norm.count { it.isLetter() && it.code > 0x024F }
+        if (cjkOrNonLatinCount >= 2) return true
+        val cleanedLowerWords = norm.split(Regex("""\s+""")).map {
+            it.lowercase().trim { ch -> !ch.isLetterOrDigit() && ch != '\'' }
+        }.filter { it.isNotEmpty() }
+        return cleanedLowerWords.any { it in SOURCE_SENTENCE_STOP_WORDS }
     }
 
     private fun normalizeForComparison(text: String): String {

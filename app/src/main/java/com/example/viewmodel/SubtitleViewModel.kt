@@ -19,6 +19,9 @@ import com.example.domain.BatchFileCandidate
 import com.example.domain.BatchQueueEngine
 import com.example.domain.BatchTranslationAttemptOutput
 import com.example.domain.SampleSubtitles
+import com.example.domain.SingleTranslationAiGateway
+import com.example.domain.SingleTranslationConfig
+import com.example.domain.SingleTranslationPipeline
 import com.example.domain.SubtitleParserAndMerger
 import com.example.model.AiProviderPreset
 import com.example.model.AiProviderSettings
@@ -101,15 +104,7 @@ data class SubtitleUiState(
     val showRawMergedPreview: Boolean = false
 ) {
     val batches: List<List<SubtitleCue>>
-        get() {
-            if (document.cues.isEmpty()) return emptyList()
-            val chunkSize = batchSizeOption.size
-            return if (chunkSize <= 0 || chunkSize >= document.cues.size) {
-                listOf(document.cues)
-            } else {
-                document.cues.chunked(chunkSize)
-            }
-        }
+        get() = SingleTranslationPipeline.chunkCues(document.cues, batchSizeOption)
 
     val activeBatchCues: List<SubtitleCue>
         get() {
@@ -124,6 +119,37 @@ data class SubtitleUiState(
 
     val missingCueIds: List<Int>
         get() = document.cues.map { it.id }.filter { !parsedTranslations.containsKey(it) }
+
+    fun toSingleTranslationConfig(
+        aiSettings: AiProviderSettings,
+        glossaryRules: List<GlossaryRule>,
+        maxRetries: Int = 3
+    ): SingleTranslationConfig {
+        return SingleTranslationConfig(
+            aiSettings = aiSettings,
+            sourceLanguage = "Auto",
+            targetLanguageOption = targetLanguageOption,
+            customTargetLanguage = customTargetLanguage,
+            stylePreset = stylePreset,
+            customPromptInstruction = customPromptInstruction,
+            separatorMode = separatorMode,
+            customSeparator = customSeparator,
+            protectAssTags = protectAssTags,
+            indexFormatMode = indexFormatMode,
+            batchSizeOption = batchSizeOption,
+            includeAiPromptHeader = includeAiPromptHeader,
+            includeGlossaryInPrompt = includeGlossaryInPrompt,
+            glossaryRules = glossaryRules,
+            autoApplyGlossaryBeforeMerge = autoApplyGlossaryBeforeMerge,
+            restoreLeadingAssTags = restoreLeadingAssTags,
+            bilingualMode = bilingualMode,
+            bilingualOrder = bilingualOrder,
+            bilingualAssSecondaryStyling = bilingualAssSecondaryStyling,
+            maxRetries = maxRetries,
+            maxChunkRepairRetries = 1,
+            checkUntranslatedSourceLeakage = true
+        )
+    }
 }
 
 class SubtitleViewModel(application: Application) : AndroidViewModel(application) {
@@ -367,21 +393,16 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun buildActiveModelSystemPrompt(): String {
-        val s = _uiState.value
-        val ai = _aiSettings.value
-        return SubtitleParserAndMerger.buildModelAdaptedSystemPrompt(
-            selectedModel = ai.selectedModel,
-            separatorMode = s.separatorMode,
-            customSeparator = s.customSeparator,
-            indexFormatMode = s.indexFormatMode,
-            includeGlossaryInPrompt = s.includeGlossaryInPrompt,
-            targetLanguageOption = s.targetLanguageOption,
-            customTargetLanguage = s.customTargetLanguage,
-            stylePreset = s.stylePreset,
-            customPromptInstruction = s.customPromptInstruction,
-            glossaryRules = _glossaryRules.value
+    fun buildActiveSingleTranslationConfig(): SingleTranslationConfig {
+        return _uiState.value.toSingleTranslationConfig(
+            aiSettings = _aiSettings.value,
+            glossaryRules = _glossaryRules.value,
+            maxRetries = _batchQueueState.value.maxRetries
         )
+    }
+
+    fun buildActiveModelSystemPrompt(): String {
+        return SingleTranslationPipeline.buildSystemPrompt(buildActiveSingleTranslationConfig())
     }
 
     fun translateCurrentBatchWithAi() {
@@ -532,7 +553,6 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
 
         activeTranslationJob = viewModelScope.launch {
             val sInitial = _uiState.value
-            val allBatches = sInitial.batches
             val totalToRun = batchIndices.size
 
             _uiState.update {
@@ -547,136 +567,86 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
             }
 
             try {
-                for ((stepIdx, batchIndex) in batchIndices.withIndex()) {
-                    val batchCues = allBatches.getOrNull(batchIndex) ?: continue
-                    val batchCueIds = batchCues.map { it.id }.toSet()
-                    val firstId = batchCues.firstOrNull()?.id ?: 1
-                    val lastId = batchCues.lastOrNull()?.id ?: batchCues.size
-                    val currentAi = _aiSettings.value
-                    val currentState = _uiState.value
+                var completedStepCount = 0
+                val config = buildActiveSingleTranslationConfig()
+                val pipelineResult = SingleTranslationPipeline.executePipeline(
+                    sourceDocument = sInitial.document,
+                    config = config,
+                    chunkIndicesToProcess = batchIndices,
+                    initialTranslations = sInitial.parsedTranslations,
+                    onChunkStarted = { chunkIndex, totalChunks, chunkCues ->
+                        val batchCueIds = chunkCues.map { it.id }.toSet()
+                        val firstId = chunkCues.firstOrNull()?.id ?: 1
+                        val lastId = chunkCues.lastOrNull()?.id ?: chunkCues.size
+                        val currentAi = _aiSettings.value
+                        _uiState.update {
+                            it.copy(
+                                selectedBatchIndex = chunkIndex,
+                                translatingCueIds = batchCueIds,
+                                aiTranslationStatusText = "Menerjemahkan Batch ${chunkIndex + 1}/$totalChunks (#$firstId–#$lastId) via ${currentAi.selectedModel}..."
+                            )
+                        }
+                    },
+                    onChunkTranslated = { chunkIndex, _, processedNewLines, _ ->
+                        val latestState = _uiState.value
+                        val batchCueIds = latestState.translatingCueIds
+                        val progressiveMap = LinkedHashMap(latestState.parsedTranslations)
+                        val remainingTranslating = batchCueIds.toMutableSet()
+                        val newlyRevealed = LinkedHashSet(latestState.recentlyTranslatedCueIds)
+                        val delayPerLineMs = if (processedNewLines.size > 40) 20L else 45L
 
+                        for ((cueId, translatedLine) in processedNewLines.entries) {
+                            progressiveMap[cueId] = translatedLine
+                            remainingTranslating.remove(cueId)
+                            newlyRevealed.add(cueId)
+
+                            val formattedEditorText = SubtitleParserAndMerger.formatTranslationsMapToEditorText(
+                                progressiveMap,
+                                _uiState.value.indexFormatMode
+                            )
+                            _uiState.update {
+                                it.copy(
+                                    parsedTranslations = LinkedHashMap(progressiveMap),
+                                    pastedEditorText = formattedEditorText,
+                                    translatingCueIds = remainingTranslating.toSet(),
+                                    recentlyTranslatedCueIds = newlyRevealed.toSet(),
+                                    aiTranslationStatusText = "Menampilkan terjemahan baris #$cueId secara realtime..."
+                                )
+                            }
+                            delay(delayPerLineMs)
+                        }
+
+                        completedStepCount++
+                        _uiState.update {
+                            it.copy(
+                                translatingCueIds = emptySet(),
+                                aiCompletedBatches = completedStepCount,
+                                aiTranslationStatusText = "Batch ${chunkIndex + 1} selesai (${processedNewLines.size} baris dipetakan)."
+                            )
+                        }
+                    }
+                )
+
+                pipelineResult.onSuccess {
+                    val finalMatched = _uiState.value.matchedCount
+                    val totalCues = _uiState.value.document.cues.size
                     _uiState.update {
                         it.copy(
-                            selectedBatchIndex = batchIndex,
-                            translatingCueIds = batchCueIds,
-                            aiTranslationStatusText = "Menerjemahkan Batch ${batchIndex + 1}/${allBatches.size} (#$firstId–#$lastId) via ${currentAi.selectedModel}..."
-                        )
-                    }
-
-                    val systemPrompt = buildActiveModelSystemPrompt()
-                    val userLinesText = batchCues.joinToString("\n") { cue ->
-                        SubtitleParserAndMerger.formatCueForExtraction(
-                            cue = cue,
-                            separatorMode = currentState.separatorMode,
-                            customSeparator = currentState.customSeparator,
-                            protectAssTags = currentState.protectAssTags,
-                            indexFormatMode = currentState.indexFormatMode
-                        )
-                    }
-
-                    val responseResult = if (currentAi.preset == AiProviderPreset.GEMINI_WEB_COOKIE) {
-                        GeminiWebCookieClient.translateSubtitleBatchWithCookies(
-                            psid = currentAi.geminiSecure1Psid,
-                            psidts = currentAi.geminiSecure1Psidts,
-                            modelId = currentAi.selectedModel,
-                            systemPrompt = systemPrompt,
-                            numberedUserLines = userLinesText
-                        )
-                    } else {
-                        OpenAiCompatibleClient.translateSubtitleBatch(
-                            baseUrl = currentAi.baseUrl,
-                            apiKey = currentAi.apiKey,
-                            modelId = currentAi.selectedModel,
-                            systemPrompt = systemPrompt,
-                            numberedUserLines = userLinesText,
-                            temperature = currentAi.temperature,
-                            combineSystemIntoUserPrompt = currentAi.combineSystemIntoUserPrompt,
-                            geminiSecure1Psid = currentAi.geminiSecure1Psid,
-                            geminiSecure1Psidts = currentAi.geminiSecure1Psidts,
-                            allowNoApiKey = currentAi.preset.isGeminiWebFamily
-                        )
-                    }
-
-                    val translatedContent = responseResult.getOrElse { error ->
-                        _uiState.update {
-                            it.copy(
-                                isTranslatingAi = false,
-                                translatingCueIds = emptySet(),
-                                aiTranslationStatusText = "Gagal pada Batch ${batchIndex + 1}: ${error.localizedMessage}",
-                                lastActionBannerMessage = "Terjemahan AI gagal: ${error.localizedMessage}"
-                            )
-                        }
-                        return@launch
-                    }
-
-                    val newlyParsed = SubtitleParserAndMerger.parseAiTranslatedLines(translatedContent)
-                    if (newlyParsed.isEmpty()) {
-                        _uiState.update {
-                            it.copy(
-                                isTranslatingAi = false,
-                                translatingCueIds = emptySet(),
-                                aiTranslationStatusText = "Respons AI pada Batch ${batchIndex + 1} tidak memiliki format nomor urut yang valid.",
-                                lastActionBannerMessage = "Format nomor dari AI tidak terdeteksi pada Batch ${batchIndex + 1}."
-                            )
-                        }
-                        return@launch
-                    }
-
-                    val latestState = _uiState.value
-                    val processedNewLines = if (latestState.autoApplyGlossaryBeforeMerge) {
-                        SubtitleParserAndMerger.applyGlossaryRulesToTranslations(
-                            newlyParsed,
-                            _glossaryRules.value
-                        ).first
-                    } else {
-                        newlyParsed
-                    }
-
-                    // Cascade translated lines one by one onto the cards in realtime
-                    val progressiveMap = LinkedHashMap(latestState.parsedTranslations)
-                    val remainingTranslating = batchCueIds.toMutableSet()
-                    val newlyRevealed = LinkedHashSet(latestState.recentlyTranslatedCueIds)
-                    val delayPerLineMs = if (processedNewLines.size > 40) 20L else 45L
-
-                    for ((cueId, translatedLine) in processedNewLines.entries) {
-                        progressiveMap[cueId] = translatedLine
-                        remainingTranslating.remove(cueId)
-                        newlyRevealed.add(cueId)
-
-                        val formattedEditorText = SubtitleParserAndMerger.formatTranslationsMapToEditorText(
-                            progressiveMap,
-                            _uiState.value.indexFormatMode
-                        )
-                        _uiState.update {
-                            it.copy(
-                                parsedTranslations = LinkedHashMap(progressiveMap),
-                                pastedEditorText = formattedEditorText,
-                                translatingCueIds = remainingTranslating.toSet(),
-                                recentlyTranslatedCueIds = newlyRevealed.toSet(),
-                                aiTranslationStatusText = "Menampilkan terjemahan baris #$cueId secara realtime..."
-                            )
-                        }
-                        delay(delayPerLineMs)
-                    }
-
-                    _uiState.update {
-                        it.copy(
+                            isTranslatingAi = false,
                             translatingCueIds = emptySet(),
-                            aiCompletedBatches = stepIdx + 1,
-                            aiTranslationStatusText = "Batch ${batchIndex + 1} selesai (${processedNewLines.size} baris dipetakan)."
+                            aiTranslationStatusText = "Selesai! $finalMatched / $totalCues baris dialog berhasil diterjemahkan & siap di-Merge.",
+                            lastActionBannerMessage = "Terjemahan AI selesai ($finalMatched/$totalCues baris cocok)!"
                         )
                     }
-                }
-
-                val finalMatched = _uiState.value.matchedCount
-                val totalCues = _uiState.value.document.cues.size
-                _uiState.update {
-                    it.copy(
-                        isTranslatingAi = false,
-                        translatingCueIds = emptySet(),
-                        aiTranslationStatusText = "Selesai! $finalMatched / $totalCues baris dialog berhasil diterjemahkan & siap di-Merge.",
-                        lastActionBannerMessage = "Terjemahan AI selesai ($finalMatched/$totalCues baris cocok)!"
-                    )
+                }.onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            isTranslatingAi = false,
+                            translatingCueIds = emptySet(),
+                            aiTranslationStatusText = "Terjemahan AI gagal: ${error.localizedMessage}",
+                            lastActionBannerMessage = "Terjemahan AI gagal: ${error.localizedMessage}"
+                        )
+                    }
                 }
             } catch (_: CancellationException) {
                 // Handled in cancelAiTranslation
@@ -1242,23 +1212,11 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
 
     fun buildFinalMergedFileContent(): String {
         val s = _uiState.value
-        val workingTranslations = if (s.autoApplyGlossaryBeforeMerge) {
-            SubtitleParserAndMerger.applyGlossaryRulesToTranslations(
-                s.parsedTranslations,
-                _glossaryRules.value
-            ).first
-        } else {
-            s.parsedTranslations
-        }
-        return SubtitleParserAndMerger.generateMergedFileContent(
+        val config = buildActiveSingleTranslationConfig()
+        return SingleTranslationPipeline.reconstructMergedContent(
             document = s.document,
-            translations = workingTranslations,
-            separatorMode = s.separatorMode,
-            customSeparator = s.customSeparator,
-            restoreLeadingAssTags = s.restoreLeadingAssTags,
-            bilingualMode = s.bilingualMode,
-            bilingualOrder = s.bilingualOrder,
-            bilingualAssSecondaryStyling = s.bilingualAssSecondaryStyling
+            translations = s.parsedTranslations,
+            config = config
         )
     }
 
@@ -1570,12 +1528,7 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
 
         activeBatchQueueJob = viewModelScope.launch {
             try {
-                val s = _uiState.value
-                val targetLangName = if (s.targetLanguageOption == TargetLanguageOption.CUSTOM) {
-                    s.customTargetLanguage.ifBlank { "Bahasa Indonesia" }
-                } else {
-                    s.targetLanguageOption.label
-                }
+                val activeConfig = buildActiveSingleTranslationConfig()
 
                 val finalState = BatchQueueEngine.executeSequentialQueue(
                     initialState = _batchQueueState.value.copy(
@@ -1583,11 +1536,12 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
                     ),
                     translator = translator,
                     outputWriter = outputWriter,
-                    glossaryRules = if (s.autoApplyGlossaryBeforeMerge) _glossaryRules.value else emptyList(),
-                    protectAssStructuralTags = s.restoreLeadingAssTags,
-                    sourceLanguage = "Auto",
-                    targetLanguage = targetLangName,
-                    checkUntranslatedSourceLeakage = true,
+                    translationConfig = activeConfig,
+                    glossaryRules = if (activeConfig.autoApplyGlossaryBeforeMerge) activeConfig.glossaryRules else emptyList(),
+                    protectAssStructuralTags = activeConfig.restoreLeadingAssTags,
+                    sourceLanguage = activeConfig.sourceLanguage,
+                    targetLanguage = activeConfig.effectiveTargetLanguageLabel,
+                    checkUntranslatedSourceLeakage = activeConfig.checkUntranslatedSourceLeakage,
                     shouldPause = { batchPauseRequested },
                     shouldCancel = { batchCancelRequested },
                     onStateChanged = { intermediate ->
@@ -1612,68 +1566,18 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private fun buildProductionBatchCueTranslator(): BatchCueTranslator {
-        return BatchCueTranslator { _, _, cuesToTranslate, onCueProgress ->
-            runCatching {
-                val s = _uiState.value
-                val ai = _aiSettings.value
-                val chunkSize = s.batchSizeOption.size.let { if (it <= 0) 80 else it }
-                val chunks = cuesToTranslate.chunked(chunkSize)
-                val accumulatedMap = LinkedHashMap<Int, String>()
-
-                for (chunk in chunks) {
-                    if (batchCancelRequested || batchPauseRequested) {
-                        throw IllegalStateException("Proses antrean dihentikan atau dijeda oleh pengguna.")
-                    }
-                    val systemPrompt = buildActiveModelSystemPrompt()
-                    val userLinesText = chunk.joinToString("\n") { cue ->
-                        SubtitleParserAndMerger.formatCueForExtraction(
-                            cue = cue,
-                            separatorMode = s.separatorMode,
-                            customSeparator = s.customSeparator,
-                            protectAssTags = s.protectAssTags,
-                            indexFormatMode = s.indexFormatMode
-                        )
-                    }
-
-                    val apiResult = if (ai.preset == AiProviderPreset.GEMINI_WEB_COOKIE) {
-                        GeminiWebCookieClient.translateSubtitleBatchWithCookies(
-                            psid = ai.geminiSecure1Psid,
-                            psidts = ai.geminiSecure1Psidts,
-                            modelId = ai.selectedModel,
-                            systemPrompt = systemPrompt,
-                            numberedUserLines = userLinesText
-                        )
-                    } else {
-                        OpenAiCompatibleClient.translateSubtitleBatch(
-                            baseUrl = ai.baseUrl,
-                            apiKey = ai.apiKey,
-                            modelId = ai.selectedModel,
-                            systemPrompt = systemPrompt,
-                            numberedUserLines = userLinesText,
-                            temperature = ai.temperature,
-                            combineSystemIntoUserPrompt = ai.combineSystemIntoUserPrompt,
-                            geminiSecure1Psid = ai.geminiSecure1Psid,
-                            geminiSecure1Psidts = ai.geminiSecure1Psidts,
-                            allowNoApiKey = ai.preset.isGeminiWebFamily
-                        )
-                    }
-
-                    val rawResponse = apiResult.getOrElse { err ->
-                        throw IllegalStateException(err.message ?: "Gagal menerjemahkan batch melalui API.")
-                    }
-
-                    val parsedChunk = SubtitleParserAndMerger.parseAiTranslatedLines(rawResponse)
-                    if (parsedChunk.isEmpty()) {
-                        throw IllegalStateException("Respons AI tidak mengandung format nomor indeks [ID] yang valid.")
-                    }
-                    accumulatedMap.putAll(parsedChunk)
-                    onCueProgress(accumulatedMap.size)
-                }
-
-                BatchTranslationAttemptOutput(translatedCues = accumulatedMap)
-            }
-        }
+    /**
+     * Delegates Batch Queue file translation directly to [SingleTranslationPipeline]
+     * with the exact [SingleTranslationConfig] used by Single Translation.
+     */
+    internal fun buildProductionBatchCueTranslator(
+        aiGateway: SingleTranslationAiGateway = com.example.domain.ProductionSingleTranslationAiGateway
+    ): BatchCueTranslator {
+        return SingleTranslationPipeline.createBatchCueTranslator(
+            configProvider = { buildActiveSingleTranslationConfig() },
+            aiGateway = aiGateway,
+            shouldAbort = { batchCancelRequested || batchPauseRequested }
+        )
     }
 
     // --- App Version & GitHub Release Update Checker ---

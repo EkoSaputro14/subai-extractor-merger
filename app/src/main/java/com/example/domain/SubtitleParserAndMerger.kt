@@ -422,9 +422,15 @@ object SubtitleParserAndMerger {
 
     /**
      * F-04: Parses pasted AI output into a map of cue.id -> translated single-line text.
+     * If [expectedCues] is provided (e.g. for Chunk #2 with IDs 101..200) and the AI model
+     * numbered its output relatively from 1..N instead of 101..200, deterministically remaps
+     * relative indices 1..N back to `expectedCues[relIdx - 1].id`.
      */
-    fun parseAiTranslatedLines(pastedText: String): Map<Int, String> {
-        val result = linkedMapOf<Int, String>()
+    fun parseAiTranslatedLines(
+        pastedText: String,
+        expectedCues: List<SubtitleCue> = emptyList()
+    ): Map<Int, String> {
+        val rawParsed = linkedMapOf<Int, String>()
         val normalized = pastedText.replace("\r\n", "\n").replace("\r", "\n")
         for (rawLine in normalized.lines()) {
             val trimmed = rawLine.trim()
@@ -434,10 +440,31 @@ object SubtitleParserAndMerger {
             val cueId = idStr.toIntOrNull() ?: continue
             val translatedBody = match.groupValues[3].trim()
             if (translatedBody.isNotEmpty()) {
-                result[cueId] = translatedBody
+                rawParsed[cueId] = translatedBody
             }
         }
-        return result
+
+        if (rawParsed.isEmpty() || expectedCues.isEmpty()) {
+            return rawParsed
+        }
+
+        val expectedIds = expectedCues.map { it.id }.toSet()
+        val directMatchCount = rawParsed.keys.count { it in expectedIds }
+
+        // If the chunk starts at an ID > 1 (e.g. 101..200) and the model output 1..N with 0 direct matches,
+        // remap 1..N directly to expectedCues[0..N-1].id so multi-chunk translations never lose chunk #2+.
+        if (directMatchCount == 0 && expectedCues.first().id != 1 && rawParsed.containsKey(1)) {
+            val remapped = linkedMapOf<Int, String>()
+            for ((relativeOneBasedIdx, text) in rawParsed.entries) {
+                val targetCue = expectedCues.getOrNull(relativeOneBasedIdx - 1) ?: continue
+                remapped[targetCue.id] = text
+            }
+            if (remapped.isNotEmpty()) {
+                return remapped
+            }
+        }
+
+        return rawParsed
     }
 
     /**
