@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">SubAI Extractor</string>
+    <string name="subtitle_app_tagline">Ekstraktor, Glosarium &amp; Smart Merger Subtitle (.ASS / .SRT / .VTT)</string>
+    <string name="action_open_file">Buka File</string>
+    <string name="action_theme_settings">Pengaturan Tema &amp; Editor</string>
+    <string name="tab_extract">Ekstrak</string>
+    <string name="tab_paste">Paste AI</string>
+    <string name="tab_glossary">Find &amp; Kamus</string>
+    <string name="tab_merge">Merge</string>
+</resources>

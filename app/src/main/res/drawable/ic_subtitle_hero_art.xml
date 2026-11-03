@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="360dp"
+    android:height="140dp"
+    android:viewportWidth="360"
+    android:viewportHeight="140">
+    <path android:pathData="M0,0h360v140h-360z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="0"
+                android:startY="0"
+                android:endX="360"
+                android:endY="140"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF0F1E32" />
+                <item android:offset="0.5" android:color="#FF162C46" />
+                <item android:offset="1.0" android:color="#FF0E272E" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Decorative timeline tracks & ASS tag blocks -->
+    <path
+        android:fillColor="#228AB4F8"
+        android:pathData="M24,26h140v18h-140z" />
+    <path
+        android:fillColor="#FF8AB4F8"
+        android:pathData="M24,26h6v18h-6z" />
+    <path
+        android:fillColor="#2281C995"
+        android:pathData="M180,26h156v18h-156z" />
+    <path
+        android:fillColor="#FF81C995"
+        android:pathData="M180,26h6v18h-6z" />
+    <path
+        android:fillColor="#22FFB951"
+        android:pathData="M24,56h210v22h-210z" />
+    <path
+        android:fillColor="#FFFFB951"
+        android:pathData="M24,56h6v22h-6z" />
+    <path
+        android:fillColor="#22D0BCFF"
+        android:pathData="M246,56h90v22h-90z" />
+    <path
+        android:fillColor="#FFD0BCFF"
+        android:pathData="M246,56h6v22h-6z" />
+    <path
+        android:fillColor="#2281C995"
+        android:pathData="M24,90h312v24h-312z" />
+    <path
+        android:fillColor="#FF81C995"
+        android:pathData="M24,90h6v24h-6z" />
+    <!-- Glowing waveform accents -->
+    <path
+        android:fillColor="#668AB4F8"
+        android:pathData="M44,32h50v6h-50zM104,32h42v6h-42zM198,32h76v6h-76zM44,64h94v6h-94zM148,64h66v6h-66zM264,64h54v6h-54zM44,99h124v6h-124zM178,99h136v6h-136z" />
+</vector>
