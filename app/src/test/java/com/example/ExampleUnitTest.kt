@@ -259,4 +259,70 @@ class ExampleUnitTest {
         assertEquals(1, matchesWithDollar.size)
         assertEquals("Harga tiket $100 USD", matchesWithDollar.first().previewReplacedText)
     }
+
+    @Test
+    fun flexibleAiParserAndAutoRetryFallback_handlesMarkdownTwoLineBlocksAndUnnumberedResponses() {
+        val doc = SubtitleParserAndMerger.parseSubtitle(
+            fileName = SampleSubtitles.SAMPLE_SRT_FILENAME,
+            rawContent = SampleSubtitles.SAMPLE_SRT_CONTENT
+        )
+
+        // 1. Test Stage A: Markdown bold, bullets, colons, backticks, parentheses, and # prefixes
+        val markdownResponse = """
+            Berikut adalah hasil terjemahan subtitle Anda:
+            - **[1]** Aah... akhirnya sampai juga...
+            * `[2]`: Jadi ini... Kota Aqua...?
+            > **3.** Luar biasa...!
+            (#4) Kita benar-benar berhasil...
+            Baris 5: Sekarang, apa yang kita lakukan?
+            | [6] | Tunggu sebentar di sini! |
+        """.trimIndent()
+
+        val stageAParsed = SubtitleParserAndMerger.parseAiTranslatedLines(markdownResponse)
+        assertEquals(6, stageAParsed.size)
+        assertEquals("Aah... akhirnya sampai juga...", stageAParsed[1])
+        assertEquals("Jadi ini... Kota Aqua...?", stageAParsed[2])
+        assertEquals("Luar biasa...!", stageAParsed[3])
+        assertEquals("Kita benar-benar berhasil...", stageAParsed[4])
+        assertEquals("Sekarang, apa yang kita lakukan?", stageAParsed[5])
+        assertEquals("Tunggu sebentar di sini!", stageAParsed[6])
+
+        // 2. Test Stage B: Standalone index on one line and translated text on the next line
+        val twoLineBlockResponse = """
+            **[1]**
+            Baris pertama di bawah nomor
+            [2]
+            Baris kedua di bawah nomor
+            #3
+            Baris ketiga di bawah nomor
+        """.trimIndent()
+
+        val stageBReport = SubtitleParserAndMerger.parseAiTranslatedLinesWithReport(twoLineBlockResponse)
+        assertEquals(3, stageBReport.parsedLines.size)
+        assertEquals("Baris pertama di bawah nomor", stageBReport.parsedLines[1])
+        assertEquals("Baris kedua di bawah nomor", stageBReport.parsedLines[2])
+        assertEquals("Baris ketiga di bawah nomor", stageBReport.parsedLines[3])
+        assertEquals("Parser Blok Nomor Multi-Baris", stageBReport.strategyUsed)
+
+        // 3. Test Stage D: Positional Fallback when AI omits line numbers completely
+        val threeCues = doc.cues.take(3)
+        val unnumberedResponse = """
+            Berikut adalah terjemahan ke Bahasa Indonesia:
+            Halo semuanya, selamat datang!
+            Apakah kalian sudah siap?
+            Mari kita mulai sekarang!
+        """.trimIndent()
+
+        val stageDReport = SubtitleParserAndMerger.parseAiTranslatedLinesWithReport(
+            pastedText = unnumberedResponse,
+            expectedCues = threeCues,
+            allowPositionalFallback = true
+        )
+        assertEquals(3, stageDReport.parsedLines.size)
+        assertEquals("Halo semuanya, selamat datang!", stageDReport.parsedLines[threeCues[0].id])
+        assertEquals("Apakah kalian sudah siap?", stageDReport.parsedLines[threeCues[1].id])
+        assertEquals("Mari kita mulai sekarang!", stageDReport.parsedLines[threeCues[2].id])
+        assertEquals("Pemetaan Baris Otomatis (Positional Fallback)", stageDReport.strategyUsed)
+    }
 }
+

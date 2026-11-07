@@ -177,6 +177,7 @@ fun ExtractTabScreen(
     var showExtractionRulesSheet by rememberSaveable { mutableStateOf(false) }
     var showPromptSheet by rememberSaveable { mutableStateOf(false) }
     var showJumpLineDialog by rememberSaveable { mutableStateOf(false) }
+    var showAiDebugLogDialog by rememberSaveable { mutableStateOf(false) }
     var jumpLineInput by rememberSaveable { mutableStateOf("") }
 
     val previewExtractedLines = remember(
@@ -424,6 +425,14 @@ fun ExtractTabScreen(
         }
     }
 
+    if (showAiDebugLogDialog) {
+        AiRawResponseDebugLogDialog(
+            uiState = uiState,
+            viewModel = viewModel,
+            onDismiss = { showAiDebugLogDialog = false }
+        )
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -443,6 +452,7 @@ fun ExtractTabScreen(
             viewModel = viewModel,
             onOpenFilePicker = onOpenFilePicker,
             onOpenAiSettingsSheet = { showAiProviderSheet = true },
+            onOpenDebugLogDialog = { showAiDebugLogDialog = true },
             onToggleShowAllCues = { showAllCuesInList = it }
         )
 
@@ -664,6 +674,7 @@ private fun ExtractWorkspaceTopBar(
     viewModel: SubtitleViewModel,
     onOpenFilePicker: () -> Unit,
     onOpenAiSettingsSheet: () -> Unit,
+    onOpenDebugLogDialog: () -> Unit,
     onToggleShowAllCues: (Boolean) -> Unit
 ) {
     var showLanguageMenu by remember { mutableStateOf(false) }
@@ -941,21 +952,33 @@ private fun ExtractWorkspaceTopBar(
 
         // Live AI Translation Progress Banner (only visible when active or status exists)
         if (uiState.isTranslatingAi || !uiState.aiTranslationStatusText.isNullOrBlank()) {
+            val isErrorStatus = uiState.aiTranslationStatusText?.contains("gagal", ignoreCase = true) == true
+            val bannerBg = if (isErrorStatus) {
+                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f)
+            } else {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+            }
+            val bannerFg = if (isErrorStatus) {
+                MaterialTheme.colorScheme.onErrorContainer
+            } else {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            }
+
             Surface(
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                color = bannerBg,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
                         text = uiState.aiTranslationStatusText ?: "",
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        maxLines = 2,
+                        color = bannerFg,
+                        maxLines = 4,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.testTag("ai_translation_status_text")
                     )
@@ -966,6 +989,44 @@ private fun ExtractWorkspaceTopBar(
                                 .height(4.dp)
                                 .clip(RoundedCornerShape(2.dp))
                         )
+                    }
+                    if (!uiState.isTranslatingAi &&
+                        (uiState.aiDebugLogs.isNotEmpty() || !uiState.lastAiRawResponsePreview.isNullOrBlank() || isErrorStatus)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { onOpenDebugLogDialog() }
+                                    .testTag("open_ai_debug_log_dialog_button")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Description,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "Lihat Respons Mentah & Log Debug",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1749,3 +1810,153 @@ fun copyToClipboard(context: Context, label: String, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
     clipboard?.setPrimaryClip(ClipData.newPlainText(label, text))
 }
+
+@Composable
+internal fun AiRawResponseDebugLogDialog(
+    uiState: SubtitleUiState,
+    viewModel: SubtitleViewModel,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val logs = uiState.aiDebugLogs
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Log Debug & Respons Mentah AI",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 460.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (logs.isEmpty()) {
+                    Text(
+                        text = uiState.lastAiRawResponsePreview
+                            ?: "Belum ada respons mentah AI yang tercatat pada sesi ini. Jalankan 'Terjemahkan AI' untuk merekam isi respons asli dari provider.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("ai_debug_log_empty_text")
+                    )
+                } else {
+                    logs.forEach { entry ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Batch ${entry.batchNumber} (${entry.cueRangeLabel})",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "${entry.mappedCount}/${entry.expectedCount} baris",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (entry.mappedCount > 0) EmeraldCheckGreen else MaterialTheme.colorScheme.error
+                                    )
+                                }
+
+                                Text(
+                                    text = "Provider: ${entry.providerLabel} • Model: ${entry.modelId}\nStrategi: ${entry.strategyUsed}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = entry.rawResponse.ifBlank { "(Respons kosong)" },
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 11.5.sp
+                                        ),
+                                        modifier = Modifier
+                                            .padding(10.dp)
+                                            .testTag("ai_debug_raw_response_batch_${entry.batchNumber}")
+                                    )
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            copyToClipboard(
+                                                context,
+                                                "Raw AI Batch ${entry.batchNumber}",
+                                                entry.rawResponse
+                                            )
+                                            viewModel.showBannerMessage("Respons mentah Batch ${entry.batchNumber} disalin ke Clipboard!")
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Salin Log", style = MaterialTheme.typography.labelSmall)
+                                    }
+
+                                    if (entry.rawResponse.isNotBlank()) {
+                                        Button(
+                                            onClick = {
+                                                viewModel.applyRawDebugResponseToPasteEditor(entry.rawResponse)
+                                                onDismiss()
+                                            },
+                                            shape = RoundedCornerShape(10.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = PrimaryForestButton,
+                                                contentColor = Color.White
+                                            ),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Peta ke Paste AI", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            if (logs.isNotEmpty()) {
+                TextButton(onClick = { viewModel.clearAiDebugLogs() }) {
+                    Text("Bersihkan Log")
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Tutup")
+            }
+        }
+    )
+}
+

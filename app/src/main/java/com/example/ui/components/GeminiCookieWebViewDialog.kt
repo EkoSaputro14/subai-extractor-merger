@@ -1,20 +1,10 @@
 package com.example.ui.components
 
-import android.annotation.SuppressLint
 import android.content.Intent
-import android.graphics.Bitmap
 import android.net.Uri
-import android.os.Build
-import android.view.View
-import android.webkit.CookieManager
-import android.webkit.RenderProcessGoneDetail
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,120 +15,103 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Cookie
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.GeminiWebCookieClient
 import com.example.data.ParsedGeminiCookies
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.ByteArrayInputStream
 
-private const val LIGHTWEIGHT_LOGIN_URL =
-    "https://accounts.google.com/ServiceLogin?hl=id&continue=https://gemini.google.com/app"
 private const val GEMINI_WEB_APP_URL = "https://gemini.google.com/app"
 
-@SuppressLint("SetJavaScriptEnabled")
+/**
+ * Crash-free Native Cookie Vault & Smart Session Extractor Dialog.
+ * Avoids spawning Chromium's isolated WebView renderer process on devices/containers
+ * without hardware DRM rendernodes (/dev/dri/renderD128), preventing native
+ * aw_browser_terminator crashes while providing instant cookie parsing and extraction.
+ */
 @Composable
 fun GeminiCookieWebViewDialog(
     onDismiss: () -> Unit,
     onCookiesExtracted: (ParsedGeminiCookies) -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val clipboardManager = LocalClipboardManager.current
 
-    var detectedCookies by remember { mutableStateOf(ParsedGeminiCookies()) }
-    var isLoadingPage by remember { mutableStateOf(true) }
     var turboMode by remember { mutableStateOf(true) }
-    var autoCloseOnCapture by remember { mutableStateOf(true) }
-    var hasAutoSubmitted by remember { mutableStateOf(false) }
-    var currentUrl by remember { mutableStateOf(LIGHTWEIGHT_LOGIN_URL) }
-    var webViewRef by remember { mutableStateOf<WebView?>(null) }
-    var webViewError by remember { mutableStateOf<String?>(null) }
+    var rawCookieInput by remember { mutableStateOf("") }
+    var manualPsid by remember { mutableStateOf("") }
+    var manualPsidts by remember { mutableStateOf("") }
+    var detectedCookies by remember { mutableStateOf(ParsedGeminiCookies()) }
     var statusHint by remember {
-        mutableStateOf("WebView Turbo aktif (tanpa gambar/font berat). Login akun Google untuk mengambil cookie otomatis.")
+        mutableStateOf(
+            "Smart Cookie Vault aktif (bebas crash WebView renderer). Tempel cookie dari Clipboard, JSON Cookie-Editor, atau masukkan __Secure-1PSID."
+        )
     }
 
-    suspend fun readCookiesInBackground(flushToDisk: Boolean = false): ParsedGeminiCookies =
-        withContext(Dispatchers.IO) {
-            runCatching {
-                val cookieManager = CookieManager.getInstance()
-                if (flushToDisk) {
-                    cookieManager.flush()
-                }
-                val geminiCookies = cookieManager.getCookie("https://gemini.google.com").orEmpty()
-                val accountsCookies = cookieManager.getCookie("https://accounts.google.com").orEmpty()
-                val googleCookies = cookieManager.getCookie("https://www.google.com").orEmpty()
-                val rootGoogleCookies = cookieManager.getCookie("https://google.com").orEmpty()
-                val combined = "$geminiCookies; $accountsCookies; $googleCookies; $rootGoogleCookies"
-                GeminiWebCookieClient.parseSmartCookieInput(combined)
-            }.getOrDefault(ParsedGeminiCookies())
+    fun evaluateInputs(rawText: String, psidText: String, psidtsText: String): ParsedGeminiCookies {
+        val fromRaw = if (rawText.isNotBlank()) {
+            GeminiWebCookieClient.parseSmartCookieInput(rawText)
+        } else {
+            ParsedGeminiCookies()
         }
+        val finalPsid = psidText.trim().ifBlank { fromRaw.secure1Psid }
+        val finalPsidts = psidtsText.trim().ifBlank { fromRaw.secure1Psidts }
+        return ParsedGeminiCookies(
+            secure1Psid = finalPsid,
+            secure1Psidts = finalPsidts
+        )
+    }
 
-    // Background non-blocking cookie poller: checks every 1.2s and auto-captures when valid
-    LaunchedEffect(autoCloseOnCapture) {
-        while (isActive && !hasAutoSubmitted) {
-            val parsed = readCookiesInBackground(flushToDisk = false)
-            if (parsed.isValid) {
-                detectedCookies = parsed
-                if (autoCloseOnCapture && !hasAutoSubmitted) {
-                    hasAutoSubmitted = true
-                    withContext(Dispatchers.IO) {
-                        runCatching { CookieManager.getInstance().flush() }
-                    }
-                    onCookiesExtracted(parsed)
-                    onDismiss()
-                    break
-                } else {
+    // Automatically inspect clipboard on open for any copied cookie header or JSON
+    LaunchedEffect(Unit) {
+        runCatching {
+            val clipText = clipboardManager.getText()?.text?.trim().orEmpty()
+            if (clipText.isNotBlank()) {
+                val parsed = GeminiWebCookieClient.parseSmartCookieInput(clipText)
+                if (parsed.isValid) {
+                    rawCookieInput = clipText
+                    manualPsid = parsed.secure1Psid
+                    manualPsidts = parsed.secure1Psidts
+                    detectedCookies = parsed
                     statusHint =
-                        "Cookie __Secure-1PSID ditemukan! Ketuk 'Gunakan Cookie Ini' untuk menyimpan."
+                        "Cookie __Secure-1PSID otomatis terdeteksi dari Clipboard! Ketuk 'Gunakan Cookie Ini' untuk menyimpan."
                 }
-            }
-            delay(1200L)
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            runCatching {
-                webViewRef?.stopLoading()
-                webViewRef?.destroy()
-                webViewRef = null
             }
         }
     }
@@ -153,22 +126,26 @@ fun GeminiCookieWebViewDialog(
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(10.dp),
+                .padding(12.dp),
             shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 4.dp
+            color = Color(0xFF0B0F17),
+            border = BorderStroke(1.dp, Color(0xFF1A2234))
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Compact Top Bar
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                // Top Header Bar
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                    color = Color(0xFF111826),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -183,38 +160,22 @@ fun GeminiCookieWebViewDialog(
                                 Icon(
                                     imageVector = Icons.Default.Bolt,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
+                                    tint = Color(0xFF00E5FF)
                                 )
                                 Column {
                                     Text(
-                                        text = "WebView Turbo — Ambil Cookie Gemini",
+                                        text = "Cookie Vault Turbo — Ambil Cookie Gemini",
                                         style = MaterialTheme.typography.titleSmall,
+                                        color = Color(0xFFF3F6FC),
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        text = currentUrl,
+                                        text = "Mode Native (Tanpa Crash Renderer WebView)",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        color = Color(0xFF8A96AC),
                                         maxLines = 1
                                     )
                                 }
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    scope.launch {
-                                        val parsed = readCookiesInBackground(flushToDisk = true)
-                                        if (parsed.isValid) {
-                                            detectedCookies = parsed
-                                        }
-                                    }
-                                    runCatching { webViewRef?.reload() }
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = "Muat Ulang Halaman"
-                                )
                             }
 
                             IconButton(
@@ -223,12 +184,13 @@ fun GeminiCookieWebViewDialog(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
-                                    contentDescription = "Tutup"
+                                    contentDescription = "Tutup",
+                                    tint = Color(0xFFF3F6FC)
                                 )
                             }
                         }
 
-                        // Turbo Toggle & External Browser Chips
+                        // Turbo Chip & External Browser Launcher
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -236,18 +198,7 @@ fun GeminiCookieWebViewDialog(
                         ) {
                             FilterChip(
                                 selected = turboMode,
-                                onClick = {
-                                    turboMode = !turboMode
-                                    webViewRef?.settings?.apply {
-                                        blockNetworkImage = turboMode
-                                        loadsImagesAutomatically = !turboMode
-                                    }
-                                    statusHint = if (turboMode) {
-                                        "Mode Turbo aktif: gambar & font berat diblokir agar login super cepat."
-                                    } else {
-                                        "Mode Penuh aktif: gambar ditampilkan (gunakan jika ada Captcha)."
-                                    }
-                                },
+                                onClick = { turboMode = !turboMode },
                                 leadingIcon = {
                                     Icon(
                                         imageVector = Icons.Default.Bolt,
@@ -255,7 +206,7 @@ fun GeminiCookieWebViewDialog(
                                         modifier = Modifier.size(16.dp)
                                     )
                                 },
-                                label = { Text(if (turboMode) "Turbo Aktif" else "Mode Penuh") },
+                                label = { Text(if (turboMode) "Parser Otomatis Aktif" else "Input Manual") },
                                 modifier = Modifier.testTag("toggle_webview_turbo_chip")
                             )
 
@@ -267,6 +218,9 @@ fun GeminiCookieWebViewDialog(
                                             Uri.parse(GEMINI_WEB_APP_URL)
                                         ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                         context.startActivity(intent)
+                                    }.onFailure {
+                                        statusHint =
+                                            "Tidak dapat membuka browser eksternal di perangkat ini. Silakan tempel nilai cookie langsung di bawah."
                                     }
                                 },
                                 shape = RoundedCornerShape(10.dp),
@@ -288,27 +242,31 @@ fun GeminiCookieWebViewDialog(
                             }
                         }
 
-                        // Status & Capture Row
+                        // Status & Quick Capture Bar
                         Surface(
                             color = if (detectedCookies.isValid) {
-                                MaterialTheme.colorScheme.primaryContainer
+                                Color(0xFF0A261E)
                             } else {
-                                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f)
+                                Color(0xFF141C2B)
                             },
                             shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(
+                                1.dp,
+                                if (detectedCookies.isValid) Color(0xFF10E596) else Color(0xFF222D42)
+                            ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
-                                modifier = Modifier.padding(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text(
                                     text = statusHint,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (detectedCookies.isValid) {
-                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                        Color(0xFF10E596)
                                     } else {
-                                        MaterialTheme.colorScheme.onSecondaryContainer
+                                        Color(0xFFD5DFEE)
                                     }
                                 )
 
@@ -318,16 +276,20 @@ fun GeminiCookieWebViewDialog(
                                 ) {
                                     FilledTonalButton(
                                         onClick = {
-                                            scope.launch {
-                                                val result = readCookiesInBackground(flushToDisk = true)
-                                                if (result.isValid) {
-                                                    detectedCookies = result
-                                                    onCookiesExtracted(result)
-                                                    onDismiss()
-                                                } else {
-                                                    statusHint =
-                                                        "Cookie __Secure-1PSID belum terdeteksi. Selesaikan login Google di bawah atau gunakan 'Browser HP' + 'Smart Paste'."
-                                                }
+                                            val clipText = clipboardManager.getText()?.text?.trim().orEmpty()
+                                            if (clipText.isNotBlank() && rawCookieInput.isBlank()) {
+                                                rawCookieInput = clipText
+                                            }
+                                            val result = evaluateInputs(rawCookieInput, manualPsid, manualPsidts)
+                                            if (result.isValid) {
+                                                detectedCookies = result
+                                                manualPsid = result.secure1Psid
+                                                manualPsidts = result.secure1Psidts
+                                                onCookiesExtracted(result)
+                                                onDismiss()
+                                            } else {
+                                                statusHint =
+                                                    "Cookie __Secure-1PSID belum ditemukan. Tempel teks cookie dari Clipboard atau isi kolom __Secure-1PSID di bawah."
                                             }
                                         },
                                         shape = RoundedCornerShape(10.dp),
@@ -351,6 +313,10 @@ fun GeminiCookieWebViewDialog(
                                                 onCookiesExtracted(detectedCookies)
                                                 onDismiss()
                                             },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = Color(0xFF10E596),
+                                                contentColor = Color(0xFF04150E)
+                                            ),
                                             shape = RoundedCornerShape(10.dp),
                                             modifier = Modifier
                                                 .weight(1f)
@@ -363,7 +329,10 @@ fun GeminiCookieWebViewDialog(
                                                 modifier = Modifier.size(18.dp)
                                             )
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Gunakan Cookie Ini")
+                                            Text(
+                                                text = "Gunakan Cookie Ini",
+                                                fontWeight = FontWeight.Bold
+                                            )
                                         }
                                     }
                                 }
@@ -372,165 +341,148 @@ fun GeminiCookieWebViewDialog(
                     }
                 }
 
-                if (isLoadingPage) {
-                    LinearProgressIndicator(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(3.dp)
-                    )
-                }
-
-                // WebView Area
-                Box(
+                // Main Smart Cookie Input Form
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    if (webViewError != null) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = webViewError ?: "",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    } else {
-                        AndroidView(
-                            modifier = Modifier.fillMaxSize(),
-                            factory = { ctx ->
-                                WebView(ctx).apply {
-                                    webViewRef = this
-                                    // Software layer prevents rendernode crash on cloud emulators without DRM GPU node
-                                    setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+                    Text(
+                        text = "1. Smart Paste (JSON Cookie-Editor / Header HTTP / Teks Mentah)",
+                        color = Color(0xFF00E5FF),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
 
-                                    runCatching {
-                                        val cm = CookieManager.getInstance()
-                                        cm.setAcceptCookie(true)
-                                        cm.setAcceptThirdPartyCookies(this, true)
-                                    }
-
-                                    settings.apply {
-                                        javaScriptEnabled = true
-                                        domStorageEnabled = true
-                                        databaseEnabled = true
-                                        // Turbo optimization: block heavy network images & media during login
-                                        blockNetworkImage = turboMode
-                                        loadsImagesAutomatically = !turboMode
-                                        cacheMode = WebSettings.LOAD_DEFAULT
-                                        useWideViewPort = true
-                                        loadWithOverviewMode = true
-                                        setSupportZoom(false)
-                                    }
-
-                                    webViewClient = object : WebViewClient() {
-                                        override fun shouldInterceptRequest(
-                                            view: WebView?,
-                                            request: WebResourceRequest?
-                                        ): WebResourceResponse? {
-                                            if (!turboMode || request == null) {
-                                                return super.shouldInterceptRequest(view, request)
-                                            }
-                                            val urlStr = request.url?.toString()?.lowercase().orEmpty()
-                                            val isCaptcha = urlStr.contains("recaptcha") ||
-                                                urlStr.contains("captcha") ||
-                                                urlStr.contains("challenge")
-                                            if (!isCaptcha && isHeavyNonAuthResource(urlStr)) {
-                                                return WebResourceResponse(
-                                                    "text/plain",
-                                                    "UTF-8",
-                                                    ByteArrayInputStream(ByteArray(0))
-                                                )
-                                            }
-                                            return super.shouldInterceptRequest(view, request)
-                                        }
-
-                                        override fun onPageStarted(
-                                            view: WebView?,
-                                            url: String?,
-                                            favicon: Bitmap?
-                                        ) {
-                                            super.onPageStarted(view, url, favicon)
-                                            isLoadingPage = true
-                                            if (!url.isNullOrBlank()) {
-                                                currentUrl = url
-                                            }
-                                        }
-
-                                        override fun onPageFinished(view: WebView?, url: String?) {
-                                            super.onPageFinished(view, url)
-                                            isLoadingPage = false
-                                            if (!url.isNullOrBlank()) {
-                                                currentUrl = url
-                                            }
-                                            scope.launch {
-                                                val parsed = readCookiesInBackground(flushToDisk = true)
-                                                if (parsed.isValid) {
-                                                    detectedCookies = parsed
-                                                    if (autoCloseOnCapture && !hasAutoSubmitted) {
-                                                        hasAutoSubmitted = true
-                                                        onCookiesExtracted(parsed)
-                                                        onDismiss()
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        override fun shouldOverrideUrlLoading(
-                                            view: WebView?,
-                                            request: WebResourceRequest?
-                                        ): Boolean = false
-
-                                        override fun onRenderProcessGone(
-                                            view: WebView?,
-                                            detail: RenderProcessGoneDetail?
-                                        ): Boolean {
-                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                                isLoadingPage = false
-                                                webViewError =
-                                                    "Proses perender WebView dihentikan oleh sistem. Gunakan tombol 'Browser HP' + 'Smart Paste Cookie'."
-                                            }
-                                            return true
-                                        }
-                                    }
-
-                                    runCatching {
-                                        loadUrl(LIGHTWEIGHT_LOGIN_URL)
-                                    }.onFailure { err ->
-                                        webViewError = "Gagal memuat WebView: ${err.localizedMessage}"
-                                    }
-                                }
+                    OutlinedTextField(
+                        value = rawCookieInput,
+                        onValueChange = { updated ->
+                            rawCookieInput = updated
+                            val parsed = evaluateInputs(updated, manualPsid, manualPsidts)
+                            detectedCookies = parsed
+                            if (parsed.secure1Psid.isNotBlank()) {
+                                manualPsid = parsed.secure1Psid
                             }
+                            if (parsed.secure1Psidts.isNotBlank()) {
+                                manualPsidts = parsed.secure1Psidts
+                            }
+                        },
+                        label = { Text("Tempel JSON Cookie, Header Cookie, atau __Secure-1PSID") },
+                        placeholder = {
+                            Text(
+                                "__Secure-1PSID=g.a000...; __Secure-1PSIDTS=sidts-...",
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp
+                            )
+                        },
+                        minLines = 3,
+                        maxLines = 5,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("raw_cookie_smart_input")
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val clipText = clipboardManager.getText()?.text?.trim().orEmpty()
+                                if (clipText.isNotBlank()) {
+                                    rawCookieInput = clipText
+                                    val parsed = GeminiWebCookieClient.parseSmartCookieInput(clipText)
+                                    manualPsid = parsed.secure1Psid
+                                    manualPsidts = parsed.secure1Psidts
+                                    detectedCookies = evaluateInputs(clipText, manualPsid, manualPsidts)
+                                    statusHint = if (detectedCookies.isValid) {
+                                        "Berhasil mengekstrak __Secure-1PSID dari Clipboard!"
+                                    } else {
+                                        "Teks Clipboard ditempel. Pastikan terdapat nilai __Secure-1PSID."
+                                    }
+                                } else {
+                                    statusHint = "Clipboard kosong. Salin cookie terlebih dahulu."
+                                }
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentPaste,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Tempel dari Clipboard")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = "2. Kredensial Cookie Terpisah (Opsional / Otomatis Terisi)",
+                        color = Color(0xFFF3F6FC),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    OutlinedTextField(
+                        value = manualPsid,
+                        onValueChange = { updated ->
+                            manualPsid = updated
+                            detectedCookies = evaluateInputs(rawCookieInput, updated, manualPsidts)
+                        },
+                        label = { Text("__Secure-1PSID (Wajib)") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("manual_psid_input")
+                    )
+
+                    OutlinedTextField(
+                        value = manualPsidts,
+                        onValueChange = { updated ->
+                            manualPsidts = updated
+                            detectedCookies = evaluateInputs(rawCookieInput, manualPsid, updated)
+                        },
+                        label = { Text("__Secure-1PSIDTS (Pendamping Sesi)") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("manual_psidts_input")
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Button(
+                        onClick = {
+                            val finalCookies = evaluateInputs(rawCookieInput, manualPsid, manualPsidts)
+                            if (finalCookies.isValid) {
+                                onCookiesExtracted(finalCookies)
+                                onDismiss()
+                            } else {
+                                statusHint = "Mohon isi nilai __Secure-1PSID terlebih dahulu sebelum menyimpan."
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF2962FF),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag("confirm_save_cookie_vault_button")
+                    ) {
+                        Text(
+                            text = "Simpan & Aktifkan Cookie Gemini",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
         }
     }
-}
-
-private fun isHeavyNonAuthResource(lowerUrl: String): Boolean {
-    val pathBeforeQuery = lowerUrl.substringBefore('?')
-    return pathBeforeQuery.endsWith(".png") ||
-        pathBeforeQuery.endsWith(".jpg") ||
-        pathBeforeQuery.endsWith(".jpeg") ||
-        pathBeforeQuery.endsWith(".gif") ||
-        pathBeforeQuery.endsWith(".webp") ||
-        pathBeforeQuery.endsWith(".svg") ||
-        pathBeforeQuery.endsWith(".woff2") ||
-        pathBeforeQuery.endsWith(".woff") ||
-        pathBeforeQuery.endsWith(".ttf") ||
-        pathBeforeQuery.endsWith(".otf") ||
-        pathBeforeQuery.endsWith(".mp4") ||
-        pathBeforeQuery.endsWith(".webm") ||
-        lowerUrl.contains("play.google.com/log") ||
-        lowerUrl.contains("googletagmanager.com") ||
-        lowerUrl.contains("doubleclick.net") ||
-        lowerUrl.contains("gstatic.com/lamda/images")
 }

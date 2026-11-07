@@ -338,6 +338,30 @@ class PreferencesRepository(context: Context) {
 
         fun defaultGlossaryRules(): List<GlossaryRule> = listOf(
             GlossaryRule(
+                id = "titan_1",
+                sourceTerm = "Survey Corps",
+                targetTerm = "Pasukan Pengintai",
+                isCaseSensitive = false,
+                wholeWord = true,
+                isEnabled = true
+            ),
+            GlossaryRule(
+                id = "titan_2",
+                sourceTerm = "Titan Shifter",
+                targetTerm = "Titan Cerdas",
+                isCaseSensitive = false,
+                wholeWord = true,
+                isEnabled = true
+            ),
+            GlossaryRule(
+                id = "titan_3",
+                sourceTerm = "Omni-Directional Mobility",
+                targetTerm = "Perlengkapan Manuver 3D",
+                isCaseSensitive = false,
+                wholeWord = true,
+                isEnabled = true
+            ),
+            GlossaryRule(
                 id = "default_1",
                 sourceTerm = "Shibuya Ward",
                 targetTerm = "Distrik Shibuya",

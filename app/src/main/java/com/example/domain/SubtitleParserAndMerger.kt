@@ -14,11 +14,45 @@ import com.example.model.TargetLanguageOption
 import com.example.model.TranslationStylePreset
 import java.util.regex.Pattern
 
+data class AiLineParseReport(
+    val parsedLines: Map<Int, String>,
+    val strategyUsed: String
+)
+
 object SubtitleParserAndMerger {
 
-    // Matches [1] Text, 1. Text, 1 | Text, 1: Text, 1 - Text, 1) Text
-    private val AI_INDEX_LINE_REGEX =
-        Regex("""^\s*(?:\[\s*(\d+)\s*\]|(\d+)\s*(?:\.|\||:|-|\)))\s*(.+)$""")
+    // Stage A1: Flexible inline numbered line matcher after stripping leading markdown bullets/bold/backticks
+    // Matches: [1] Text, [001]: Text, [1] - Text, (#1) Text, (1) Text, #1: Text, 1. Text, 1) Text, 1 | Text, 1: Text, 1 - Text, Baris 1: Text, Line 1: Text
+    private val AI_FLEXIBLE_INDEX_LINE_REGEX = Regex(
+        """^(?:(?:baris|line|dialog|cue)\s*)?(?:\[\s*#?\s*(\d+)\s*\]\s*[:.\-|]*|\(\s*#?\s*(\d+)\s*\)\s*[:.\-|]*|#\s*(\d+)\s*[:.\-|)+]*|(\d+)\s*(?:\.|\||:|-|\)))\s*(.+)$""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // Stage A2: Markdown table row e.g. | 1 | Teks terjemahan | or | [1] | Teks |
+    private val AI_MARKDOWN_TABLE_ROW_REGEX = Regex(
+        """^\|\s*(?:\[\s*#?\s*(\d+)\s*\]|#?\s*(\d+))\s*\|\s*(.+?)\s*\|?$"""
+    )
+
+    // Stage A3: JSON key-value line e.g. "1": "Teks" or "[1]": "Teks" or {"id": 1, "text": "Teks"}
+    private val AI_JSON_KV_LINE_REGEX = Regex(
+        """^["']?\[?#?(\d+)\]?["']?\s*:\s*["'](.+?)["']\s*,?\s*$"""
+    )
+    private val AI_JSON_OBJ_LINE_REGEX = Regex(
+        """^\{[^}]*?"(?:id|index|line)"\s*:\s*["']?(\d+)["']?[^}]*?"(?:text|translation|content)"\s*:\s*"([^"]+)"[^}]*\}\s*,?\s*$""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // Stage B: Standalone index line where text is placed on the next line(s), e.g. "[1]", "**[1]**", "1.", "#1", "(1)"
+    private val AI_STANDALONE_INDEX_LINE_REGEX = Regex(
+        """^(?:(?:baris|line|dialog|cue)\s*)?(?:\[\s*#?\s*(\d+)\s*\]|\(\s*#?\s*(\d+)\s*\)|#\s*(\d+)|(\d+)\s*[.):|\-]?)\s*[:.\-|]*$""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // Conversational AI intro/outro or refusal lines to ignore during Stage D positional fallback
+    private val AI_CONVERSATIONAL_PREAMBLE_REGEX = Regex(
+        """^(?:berikut\s+(?:adalah|ini)|ini\s+(?:adalah|hasil)|tentu[,!\s]|baik[,!\s]|here\s+(?:is|are)|sure[,!\s]|certainly[,!\s]|catatan\s*:|note\s*:|---\s*daftar|daftar\s+dialog|hasil\s+terjemahan|terjemahan\s+subtitle|semoga\s+membantu|maaf[,\s]+saya\s+tidak\s+dapat|i\s+cannot\s+fulfill|i['’]?m\s+sorry[,\s]+i\s+can['’]?t).*$""",
+        RegexOption.IGNORE_CASE
+    )
 
     private val LEADING_ASS_TAGS_REGEX = Regex("""^(?:\{[^}]*\})+""")
     private val ANY_ASS_TAG_REGEX = Regex("""\{[^}]*\}""")
@@ -421,42 +455,223 @@ object SubtitleParserAndMerger {
     }
 
     /**
-     * F-04: Parses pasted AI output into a map of cue.id -> translated single-line text.
-     * If [expectedCues] is provided (e.g. for Chunk #2 with IDs 101..200) and the AI model
-     * numbered its output relatively from 1..N instead of 101..200, deterministically remaps
-     * relative indices 1..N back to `expectedCues[relIdx - 1].id`.
+     * F-04: Parses pasted or AI-returned output into a map of `cue.id -> translated single-line text`.
+     * Supports:
+     * - Stage A: Flexible inline numbering (`[1]`, `**[1]**`, `- [1]:`, `[001]`, `1.`, `**1.**`, `(1)`, `#1`, `Baris 1:`, Markdown tables, JSON lines)
+     * - Stage B: Multi-line standalone index blocks (`[1]\nTeks terjemahan`)
+     * - Relative index remapping (`1..N` -> `expectedCues[0..N-1].id` for chunks starting at ID > 1)
+     * - Stage D: Positional fallback mapping when `allowPositionalFallback = true` and the model omitted line numbers
      */
     fun parseAiTranslatedLines(
         pastedText: String,
-        expectedCues: List<SubtitleCue> = emptyList()
+        expectedCues: List<SubtitleCue> = emptyList(),
+        allowPositionalFallback: Boolean = false
     ): Map<Int, String> {
+        return parseAiTranslatedLinesWithReport(
+            pastedText = pastedText,
+            expectedCues = expectedCues,
+            allowPositionalFallback = allowPositionalFallback
+        ).parsedLines
+    }
+
+    fun parseAiTranslatedLinesWithReport(
+        pastedText: String,
+        expectedCues: List<SubtitleCue> = emptyList(),
+        allowPositionalFallback: Boolean = false
+    ): AiLineParseReport {
         val rawParsed = linkedMapOf<Int, String>()
-        val normalized = pastedText.replace("\r\n", "\n").replace("\r", "\n")
+        var usedStandaloneBlockStage = false
+        val normalized = pastedText
+            .replace("\uFEFF", "")
+            .replace("\u200B", "")
+            .replace("\u200C", "")
+            .replace("\u200D", "")
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+
+        var pendingStandaloneCueId: Int? = null
+
         for (rawLine in normalized.lines()) {
             val trimmed = rawLine.trim()
             if (trimmed.isEmpty()) continue
-            val match = AI_INDEX_LINE_REGEX.matchEntire(trimmed) ?: continue
-            val idStr = match.groupValues[1].ifEmpty { match.groupValues[2] }
-            val cueId = idStr.toIntOrNull() ?: continue
-            val translatedBody = match.groupValues[3].trim()
-            if (translatedBody.isNotEmpty()) {
-                rawParsed[cueId] = translatedBody
+
+            // Ignore markdown code fences or table divider rows like |---|---|
+            if (trimmed.startsWith("```") || trimmed.matches(Regex("""^\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)+\|?$"""))) {
+                continue
+            }
+
+            // 1. Check Stage A2: Markdown table row | 1 | Text |
+            val tableMatch = AI_MARKDOWN_TABLE_ROW_REGEX.matchEntire(trimmed)
+            if (tableMatch != null) {
+                val idStr = tableMatch.groupValues[1].ifEmpty { tableMatch.groupValues[2] }
+                val cueId = idStr.toIntOrNull()
+                val body = cleanExtractedBodyText(tableMatch.groupValues[3])
+                if (cueId != null && body.isNotEmpty() && !body.equals("Text", ignoreCase = true) && !body.equals("Terjemahan", ignoreCase = true)) {
+                    rawParsed[cueId] = body
+                    pendingStandaloneCueId = null
+                    continue
+                }
+            }
+
+            // 2. Check Stage A3: JSON object or JSON key-value line
+            val jsonObjMatch = AI_JSON_OBJ_LINE_REGEX.matchEntire(trimmed)
+            if (jsonObjMatch != null) {
+                val cueId = jsonObjMatch.groupValues[1].toIntOrNull()
+                val body = cleanExtractedBodyText(jsonObjMatch.groupValues[2])
+                if (cueId != null && body.isNotEmpty()) {
+                    rawParsed[cueId] = body
+                    pendingStandaloneCueId = null
+                    continue
+                }
+            }
+            val jsonKvMatch = AI_JSON_KV_LINE_REGEX.matchEntire(trimmed)
+            if (jsonKvMatch != null) {
+                val cueId = jsonKvMatch.groupValues[1].toIntOrNull()
+                val body = cleanExtractedBodyText(jsonKvMatch.groupValues[2])
+                if (cueId != null && body.isNotEmpty()) {
+                    rawParsed[cueId] = body
+                    pendingStandaloneCueId = null
+                    continue
+                }
+            }
+
+            // Normalize leading markdown bullets (-, *, •, >) and bold/italic/backtick wrappers around index prefix
+            val unwrappedLine = stripLeadingMarkdownIndexWrappers(trimmed)
+
+            // 3. Check Stage A1: Flexible inline numbered line ([1] Text, **[1]**: Text, 1. Text, #1 Text, etc.)
+            val inlineMatch = AI_FLEXIBLE_INDEX_LINE_REGEX.matchEntire(unwrappedLine)
+            if (inlineMatch != null) {
+                val idStr = inlineMatch.groupValues.drop(1).dropLast(1).firstOrNull { it.isNotEmpty() }.orEmpty()
+                val cueId = idStr.toIntOrNull()
+                val translatedBody = cleanExtractedBodyText(inlineMatch.groupValues.last())
+                if (cueId != null && translatedBody.isNotEmpty()) {
+                    rawParsed[cueId] = translatedBody
+                    pendingStandaloneCueId = null
+                    continue
+                }
+            }
+
+            // 4. Check Stage B: Standalone index line where the translated text is on the following line(s)
+            val standaloneMatch = AI_STANDALONE_INDEX_LINE_REGEX.matchEntire(unwrappedLine)
+            if (standaloneMatch != null) {
+                val idStr = standaloneMatch.groupValues.drop(1).firstOrNull { it.isNotEmpty() }.orEmpty()
+                val cueId = idStr.toIntOrNull()
+                if (cueId != null) {
+                    pendingStandaloneCueId = cueId
+                    continue
+                }
+            }
+
+            // If we have a pending standalone index from the previous line, attach this line as its body
+            val activePendingId = pendingStandaloneCueId
+            if (activePendingId != null) {
+                val cleanBody = cleanExtractedBodyText(unwrappedLine)
+                if (cleanBody.isNotEmpty() && !AI_CONVERSATIONAL_PREAMBLE_REGEX.matches(cleanBody)) {
+                    val existing = rawParsed[activePendingId]
+                    rawParsed[activePendingId] = if (existing.isNullOrEmpty()) {
+                        cleanBody
+                    } else {
+                        "$existing // $cleanBody"
+                    }
+                    usedStandaloneBlockStage = true
+                    continue
+                }
             }
         }
 
-        if (rawParsed.isEmpty() || expectedCues.isEmpty()) {
-            return rawParsed
+        // If Stage A or Stage B produced indexed lines, remap relative 1..N indices if needed
+        if (rawParsed.isNotEmpty()) {
+            val remapped = remapRelativeIndicesIfNeeded(rawParsed, expectedCues)
+            val strategyLabel = if (usedStandaloneBlockStage) {
+                "Parser Blok Nomor Multi-Baris"
+            } else {
+                "Parser Nomor Fleksibel"
+            }
+            return AiLineParseReport(
+                parsedLines = remapped,
+                strategyUsed = strategyLabel
+            )
         }
+
+        // 5. Stage D: Positional Fallback Mapping when AI omitted line numbers completely
+        if (allowPositionalFallback && expectedCues.isNotEmpty()) {
+            val candidateLines = extractCleanUnnumberedCandidateLines(normalized)
+            val minAcceptableLines = if (expectedCues.size <= 2) {
+                1
+            } else {
+                maxOf(2, expectedCues.size / 3)
+            }
+            if (candidateLines.size >= minAcceptableLines) {
+                val positionalMap = linkedMapOf<Int, String>()
+                val limit = minOf(expectedCues.size, candidateLines.size)
+                for (i in 0 until limit) {
+                    val body = cleanExtractedBodyText(candidateLines[i])
+                    if (body.isNotEmpty()) {
+                        positionalMap[expectedCues[i].id] = body
+                    }
+                }
+                if (positionalMap.isNotEmpty()) {
+                    return AiLineParseReport(
+                        parsedLines = positionalMap,
+                        strategyUsed = "Pemetaan Baris Otomatis (Positional Fallback)"
+                    )
+                }
+            }
+        }
+
+        return AiLineParseReport(
+            parsedLines = emptyMap(),
+            strategyUsed = "Tidak Terpetakan"
+        )
+    }
+
+    private fun stripLeadingMarkdownIndexWrappers(trimmedLine: String): String {
+        // Strip leading markdown bullets or blockquotes: "- **[1]** Teks" -> "**[1]** Teks"
+        var working = trimmedLine.replaceFirst(Regex("""^(?:[-*•>+]+\s+)+"""), "").trim()
+        // Unwrap bold/italic/code markers around the leading number token: "**[1]**: Teks" -> "[1]: Teks"
+        working = working.replaceFirst(
+            Regex("""^[*_`~]+(\[\s*#?\s*\d+\s*\]\s*[:.\-|]*|\(\s*#?\s*\d+\s*\)\s*[:.\-|]*|#\s*\d+\s*[:.\-|]*|\d+\s*[.|:\-)]?)[*_`~]+\s*[:.\-|]*\s*"""),
+            "$1 "
+        )
+        // Also strip leading bold/code markers if they only precede the bracket e.g. "**[1] Teks**"
+        if (working.startsWith("**") && working.endsWith("**") && working.length > 4) {
+            working = working.substring(2, working.length - 2).trim()
+        }
+        working = working.replaceFirst(Regex("""^[*_`~]+(?=\[\s*#?\s*\d+\s*\]|\(\s*#?\s*\d+\s*\)|#\s*\d+|\d+\s*[.|:\-)])"""), "")
+        return working.trim()
+    }
+
+    private fun cleanExtractedBodyText(rawBody: String): String {
+        var body = rawBody.trim()
+        // Strip leftover leading markdown separator after index e.g. "** - Teks" or ": Teks"
+        body = body.replaceFirst(Regex("""^[*_`~]+\s*[:.\-|]*\s*"""), "").trim()
+        body = body.replaceFirst(Regex("""^[:\-|]+\s+"""), "").trim()
+        // Strip outer wrapping quotes if the entire line was quoted by the LLM (and wasn't originally quoted)
+        if ((body.startsWith("\"") && body.endsWith("\"")) || (body.startsWith("“") && body.endsWith("”"))) {
+            if (body.length > 2 && body.count { it == '"' } == 2) {
+                body = body.substring(1, body.length - 1).trim()
+            }
+        }
+        return body
+    }
+
+    private fun remapRelativeIndicesIfNeeded(
+        rawParsed: Map<Int, String>,
+        expectedCues: List<SubtitleCue>
+    ): Map<Int, String> {
+        if (rawParsed.isEmpty() || expectedCues.isEmpty()) return rawParsed
 
         val expectedIds = expectedCues.map { it.id }.toSet()
         val directMatchCount = rawParsed.keys.count { it in expectedIds }
 
         // If the chunk starts at an ID > 1 (e.g. 101..200) and the model output 1..N with 0 direct matches,
         // remap 1..N directly to expectedCues[0..N-1].id so multi-chunk translations never lose chunk #2+.
-        if (directMatchCount == 0 && expectedCues.first().id != 1 && rawParsed.containsKey(1)) {
+        if (directMatchCount == 0 && expectedCues.first().id != 1 && (rawParsed.containsKey(1) || rawParsed.containsKey(0))) {
+            val isZeroBased = !rawParsed.containsKey(1) && rawParsed.containsKey(0)
             val remapped = linkedMapOf<Int, String>()
-            for ((relativeOneBasedIdx, text) in rawParsed.entries) {
-                val targetCue = expectedCues.getOrNull(relativeOneBasedIdx - 1) ?: continue
+            for ((relativeIdx, text) in rawParsed.entries) {
+                val listIdx = if (isZeroBased) relativeIdx else relativeIdx - 1
+                val targetCue = expectedCues.getOrNull(listIdx) ?: continue
                 remapped[targetCue.id] = text
             }
             if (remapped.isNotEmpty()) {
@@ -464,7 +679,36 @@ object SubtitleParserAndMerger {
             }
         }
 
+        // Also handle 0-based indexing [0]..[N-1] when expectedCues starts at 1
+        if (!rawParsed.containsKey(expectedCues.last().id) && rawParsed.containsKey(0) && expectedCues.first().id == 1) {
+            val shifted = linkedMapOf<Int, String>()
+            for ((zeroIdx, text) in rawParsed.entries) {
+                val targetCue = expectedCues.getOrNull(zeroIdx) ?: continue
+                shifted[targetCue.id] = text
+            }
+            if (shifted.size >= rawParsed.size) {
+                return shifted
+            }
+        }
+
         return rawParsed
+    }
+
+    private fun extractCleanUnnumberedCandidateLines(normalizedText: String): List<String> {
+        val candidates = mutableListOf<String>()
+        for (rawLine in normalizedText.lines()) {
+            val trimmed = rawLine.trim()
+            if (trimmed.isEmpty()) continue
+            if (trimmed.startsWith("```") || trimmed.startsWith("---") || trimmed.startsWith("***") || trimmed.startsWith("===")) {
+                continue
+            }
+            if (trimmed.startsWith("#")) continue
+            val withoutBullet = trimmed.replaceFirst(Regex("""^(?:[-*•>+]+\s+)+"""), "").trim()
+            if (withoutBullet.isEmpty()) continue
+            if (AI_CONVERSATIONAL_PREAMBLE_REGEX.matches(withoutBullet)) continue
+            candidates.add(withoutBullet)
+        }
+        return candidates
     }
 
     /**

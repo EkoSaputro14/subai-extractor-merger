@@ -164,4 +164,54 @@ Dialogue: 0,0:00:09.60,0:00:13.80,Default,Megumi,0,0,0,,The barrier is shatterin
             rawContent = SAMPLE_BATCH_EPISODE_04_ASS
         )
     )
+
+    fun buildShingekiStudioSampleCandidates(): List<BatchFileCandidate> = listOf(
+        BatchFileCandidate(
+            fileName = "Shingeki_EP01.ass",
+            sourceUriString = "sample://Shingeki_EP01.ass",
+            rawContent = SAMPLE_BATCH_EPISODE_04_ASS
+        ),
+        BatchFileCandidate(
+            fileName = "Shingeki_EP02.ass",
+            sourceUriString = "sample://Shingeki_EP02.ass",
+            rawContent = SAMPLE_ASS_CONTENT
+        ),
+        BatchFileCandidate(
+            fileName = "Shingeki_EP03.vtt",
+            sourceUriString = "sample://Shingeki_EP03.vtt",
+            rawContent = SAMPLE_BATCH_EPISODE_03_VTT
+        ),
+        BatchFileCandidate(
+            fileName = "Shingeki_EP04.srt",
+            sourceUriString = "sample://Shingeki_EP04.srt",
+            rawContent = SAMPLE_BATCH_EPISODE_01_SRT
+        )
+    )
+
+    fun buildDefaultShingekiGlossaryRules(): List<com.example.model.GlossaryRule> = listOf(
+        com.example.model.GlossaryRule(
+            id = "titan_glossary_1",
+            sourceTerm = "Survey Corps",
+            targetTerm = "Pasukan Pengintai",
+            isCaseSensitive = false,
+            wholeWord = true,
+            isEnabled = true
+        ),
+        com.example.model.GlossaryRule(
+            id = "titan_glossary_2",
+            sourceTerm = "Titan Shifter",
+            targetTerm = "Titan Cerdas",
+            isCaseSensitive = false,
+            wholeWord = true,
+            isEnabled = true
+        ),
+        com.example.model.GlossaryRule(
+            id = "titan_glossary_3",
+            sourceTerm = "Omni-Directional Mobility",
+            targetTerm = "Perlengkapan Manuver 3D",
+            isCaseSensitive = false,
+            wholeWord = true,
+            isEnabled = true
+        )
+    )
 }

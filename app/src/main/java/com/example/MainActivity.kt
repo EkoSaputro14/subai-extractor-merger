@@ -76,6 +76,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.model.AiProviderSettings
 import com.example.model.BatchQueueState
 import com.example.model.GlossaryRule
+import com.example.model.QueueUiEvent
 import com.example.model.ThemeSettings
 import com.example.ui.screens.AiProviderDetailScreenContent
 import com.example.ui.screens.BatchQueueTabScreen
@@ -85,6 +86,8 @@ import com.example.ui.screens.HomeDashboardScreen
 import com.example.ui.screens.MergeTabScreen
 import com.example.ui.screens.PasteTabScreen
 import com.example.ui.screens.SettingsScreenContent
+import com.example.ui.screens.StudioObsidianBg
+import com.example.ui.screens.SubAiMviLinearBatchWorkspace
 import com.example.ui.screens.SubAiOnboardingScreen
 import com.example.ui.screens.SubAiParallelogramLogo
 import com.example.ui.screens.SubAiSplashScreen
@@ -139,26 +142,17 @@ fun SubAiExtractorMainScreen(
     val themeSettings by viewModel.themeSettings.collectAsStateWithLifecycle()
     val batchState by viewModel.batchQueueState.collectAsStateWithLifecycle()
 
-    // Intro state: 0 = Main App, 1 = Screen 1 Splash, 2 = Screen 2 Onboarding
     var introStep by rememberSaveable {
         val prefs = context.getSharedPreferences(INTRO_PREFS_NAME, Context.MODE_PRIVATE)
         val alreadySeen = prefs.getBoolean(KEY_SEEN_ONBOARDING_V1_3, false)
-        mutableIntStateOf(if (enableFirstLaunchIntro && !alreadySeen) 1 else 0)
+        mutableIntStateOf(if (enableFirstLaunchIntro && initialTab != -1 && !alreadySeen) 1 else 0)
     }
 
-    // -1 = Beranda (Screen 3)
-    //  0 = Ekstrak & Terjemahkan (Screen 4)
-    //  1 = Paste AI (Screen 5)
-    //  2 = Find & Kamus (Screens 6 & 7)
-    //  3 = Merge Subtitle (Screen 8)
-    //  4 = Batch Queue (Screen 9)
-    //  5 = Pengaturan (Screen 10)
     var selectedTab by rememberSaveable { mutableIntStateOf(initialTab.coerceIn(-1, 5)) }
     var settingsSubCategory by rememberSaveable { mutableIntStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
-    // Return to Beranda (-1) when Back is pressed on secondary screens (0..5)
     BackHandler(enabled = introStep == 0 && selectedTab != -1) {
         if (selectedTab == 5 && settingsSubCategory != 0) {
             settingsSubCategory = 0
@@ -187,7 +181,7 @@ fun SubAiExtractorMainScreen(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         if (uris.isNotEmpty()) {
-            viewModel.addUrisToBatchQueue(uris)
+            viewModel.onQueueEvent(QueueUiEvent.OnAddFiles(uris))
         }
     }
 
@@ -207,7 +201,36 @@ fun SubAiExtractorMainScreen(
         }
     }
 
-    // Screen 1 -> Screen 2 -> Screen 3 flow matching the 10-screen Reference Image
+    // Primary MVI Linear Batch Workspace (Default App Flow)
+    if (selectedTab == -1) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = StudioObsidianBg,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
+                SubAiMviLinearBatchWorkspace(
+                    viewModel = viewModel,
+                    onSelectMultipleFiles = {
+                        openMultipleSubtitlesLauncher.launch(arrayOf("*/*"))
+                    },
+                    onChooseOutputFolder = {
+                        openBatchOutputFolderLauncher.launch(null)
+                    },
+                    onSaveMergedFile = { suggestedFileName ->
+                        createSubtitleLauncher.launch(suggestedFileName)
+                    }
+                )
+            }
+        }
+        return
+    }
+
     if (introStep == 1) {
         SubAiSplashScreen(
             onFinished = { introStep = 2 }

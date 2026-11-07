@@ -355,58 +355,99 @@ object GeminiWebCookieClient {
                 put(innerJsonStr)
             }.toString()
 
-            val reqId = Random.nextInt(100_000, 999_999)
-            val encodedBl = URLEncoder.encode(tokens.blBuildLabel, "UTF-8")
-            val endpoint = "$GEMINI_STREAM_GENERATE_URL?bl=$encodedBl&_reqid=$reqId&rt=c"
+            val firstAttemptText = executeStreamGenerateRequest(
+                psid = psid,
+                psidts = psidts,
+                tokens = tokens,
+                outerFreqStr = outerFreqStr,
+                modelHeaderVal = resolveModelHeader(modelId)
+            )
 
-            val postFormBody = "f.req=" + URLEncoder.encode(outerFreqStr, "UTF-8") +
-                "&at=" + URLEncoder.encode(tokens.snlm0eToken, "UTF-8") + "&"
-
-            val cookieHeader = buildCookieHeaderValue(psid, psidts)
-            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                doOutput = true
-                connectTimeout = 25_000
-                readTimeout = 95_000
-                setRequestProperty("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
-                setRequestProperty("User-Agent", USER_AGENT)
-                setRequestProperty("Origin", "https://gemini.google.com")
-                setRequestProperty("Referer", "https://gemini.google.com/")
-                setRequestProperty("X-Same-Domain", "1")
-                setRequestProperty("Cookie", cookieHeader)
-                resolveModelHeader(modelId)?.let { modelHeaderVal ->
-                    setRequestProperty("x-goog-ext-525001261-jspb", modelHeaderVal)
-                }
+            val cleanedFirst = OpenAiCompatibleClient.cleanAiModelOutput(firstAttemptText)
+            // If a specific model header was sent and Gemini Web returned blank or a short non-indexed refusal,
+            // automatically retry once without the custom model header (falling back to default Gemini Web model).
+            val hasNumberedLine = cleanedFirst.lineSequence().any { line ->
+                line.trim().matches(Regex("""^(?:[*_`~>\-\s•]*)(?:\[\s*\d+\s*\]|\d+\s*[.|:\-)]|#\d+).*"""))
             }
-
-            try {
-                OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { writer ->
-                    writer.write(postFormBody)
-                    writer.flush()
-                }
-
-                val code = connection.responseCode
-                val rawResponse = readStream(connection, isError = code !in 200..299)
-                if (code !in 200..299) {
-                    throw IllegalStateException("HTTP $code saat memanggil StreamGenerate Gemini Web")
-                }
-
-                val extractedText = parseBardStreamResponse(rawResponse)
-                if (extractedText.isBlank()) {
-                    throw IllegalStateException(
-                        "Respons Gemini Web kosong atau cookie membutuhkan penyegaran (__Secure-1PSIDTS)."
+            if ((cleanedFirst.isBlank() || (!hasNumberedLine && cleanedFirst.lines().size < 2)) &&
+                resolveModelHeader(modelId) != null
+            ) {
+                val fallbackAttemptText = runCatching {
+                    executeStreamGenerateRequest(
+                        psid = psid,
+                        psidts = psidts,
+                        tokens = tokens,
+                        outerFreqStr = outerFreqStr,
+                        modelHeaderVal = null
                     )
+                }.getOrDefault("")
+                val cleanedFallback = OpenAiCompatibleClient.cleanAiModelOutput(fallbackAttemptText)
+                if (cleanedFallback.isNotBlank()) {
+                    return@runCatching cleanedFallback
                 }
-                OpenAiCompatibleClient.cleanAiModelOutput(extractedText)
-            } finally {
-                connection.disconnect()
             }
+
+            if (cleanedFirst.isBlank()) {
+                throw IllegalStateException(
+                    "Respons Gemini Web kosong atau cookie membutuhkan penyegaran (__Secure-1PSIDTS)."
+                )
+            }
+            cleanedFirst
+        }
+    }
+
+    private fun executeStreamGenerateRequest(
+        psid: String,
+        psidts: String,
+        tokens: GeminiWebSessionTokens,
+        outerFreqStr: String,
+        modelHeaderVal: String?
+    ): String {
+        val reqId = Random.nextInt(100_000, 999_999)
+        val encodedBl = URLEncoder.encode(tokens.blBuildLabel, "UTF-8")
+        val endpoint = "$GEMINI_STREAM_GENERATE_URL?bl=$encodedBl&_reqid=$reqId&rt=c"
+
+        val postFormBody = "f.req=" + URLEncoder.encode(outerFreqStr, "UTF-8") +
+            "&at=" + URLEncoder.encode(tokens.snlm0eToken, "UTF-8") + "&"
+
+        val cookieHeader = buildCookieHeaderValue(psid, psidts)
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 25_000
+            readTimeout = 95_000
+            setRequestProperty("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+            setRequestProperty("User-Agent", USER_AGENT)
+            setRequestProperty("Origin", "https://gemini.google.com")
+            setRequestProperty("Referer", "https://gemini.google.com/")
+            setRequestProperty("X-Same-Domain", "1")
+            setRequestProperty("Cookie", cookieHeader)
+            if (modelHeaderVal != null) {
+                setRequestProperty("x-goog-ext-525001261-jspb", modelHeaderVal)
+            }
+        }
+
+        try {
+            OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { writer ->
+                writer.write(postFormBody)
+                writer.flush()
+            }
+
+            val code = connection.responseCode
+            val rawResponse = readStream(connection, isError = code !in 200..299)
+            if (code !in 200..299) {
+                throw IllegalStateException("HTTP $code saat memanggil StreamGenerate Gemini Web")
+            }
+
+            return parseBardStreamResponse(rawResponse)
+        } finally {
+            connection.disconnect()
         }
     }
 
     /**
      * Parses the multi-line `)]}'` response from `BardFrontendService/StreamGenerate`
-     * to extract the candidate response text.
+     * to extract the candidate response text across all `wrb.fr` frames and nested candidate structures.
      */
     fun parseBardStreamResponse(rawResponse: String): String {
         var bestCandidate = ""
@@ -422,22 +463,76 @@ object GeminiWebCookieClient {
                     if (payloadStr.isBlank() || payloadStr == "null") continue
 
                     val payloadJson = JSONArray(payloadStr)
-                    // Candidate list is typically at payloadJson[4]
-                    val candidates = payloadJson.optJSONArray(4) ?: continue
-                    if (candidates.length() > 0) {
-                        val firstCandidate = candidates.optJSONArray(0) ?: continue
-                        val textParts = firstCandidate.optJSONArray(1) ?: continue
-                        if (textParts.length() > 0) {
-                            val candidateText = textParts.optString(0, "")
-                            if (candidateText.isNotBlank()) {
-                                bestCandidate = candidateText
+                    // 1. Standard candidate list at payloadJson[4]
+                    val candidates = payloadJson.optJSONArray(4)
+                    if (candidates != null && candidates.length() > 0) {
+                        val firstCandidate = candidates.optJSONArray(0)
+                        if (firstCandidate != null) {
+                            val textParts = firstCandidate.optJSONArray(1)
+                            if (textParts != null && textParts.length() > 0) {
+                                val combinedParts = buildString {
+                                    for (partIdx in 0 until textParts.length()) {
+                                        val partStr = textParts.optString(partIdx, "")
+                                        if (partStr.isNotEmpty()) {
+                                            append(partStr)
+                                        }
+                                    }
+                                }.trim()
+                                if (combinedParts.isNotBlank()) {
+                                    bestCandidate = combinedParts
+                                }
+                            } else {
+                                val directStr = firstCandidate.optString(1, "").trim()
+                                if (directStr.isNotBlank()) {
+                                    bestCandidate = directStr
+                                }
                             }
+                        }
+                    }
+
+                    // 2. Fallback: recursively locate candidate text following an "rc_" response candidate ID
+                    if (bestCandidate.isBlank()) {
+                        val fallbackText = extractCandidateAfterRcId(payloadJson)
+                        if (fallbackText.isNotBlank()) {
+                            bestCandidate = fallbackText
                         }
                     }
                 }
             }
         }
         return bestCandidate.trim()
+    }
+
+    private fun extractCandidateAfterRcId(node: Any?): String {
+        if (node !is JSONArray) return ""
+        if (node.length() >= 2) {
+            val firstStr = node.optString(0, "")
+            if (firstStr.startsWith("rc_") || firstStr.startsWith("c_")) {
+                val secondArr = node.optJSONArray(1)
+                if (secondArr != null && secondArr.length() > 0) {
+                    val joined = buildString {
+                        for (i in 0 until secondArr.length()) {
+                            val s = secondArr.optString(i, "")
+                            if (s.isNotEmpty()) append(s)
+                        }
+                    }.trim()
+                    if (joined.isNotBlank()) return joined
+                }
+                val secondStr = node.optString(1, "").trim()
+                if (secondStr.isNotBlank() && !secondStr.startsWith("[")) {
+                    return secondStr
+                }
+            }
+        }
+        var best = ""
+        for (i in 0 until node.length()) {
+            val child = node.optJSONArray(i) ?: continue
+            val found = extractCandidateAfterRcId(child)
+            if (found.length > best.length) {
+                best = found
+            }
+        }
+        return best
     }
 
     private fun readStream(connection: HttpURLConnection, isError: Boolean): String {

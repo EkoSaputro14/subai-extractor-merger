@@ -101,6 +101,30 @@ object ProductionSingleTranslationAiGateway : SingleTranslationAiGateway {
 }
 
 /**
+ * Debug log record for a single chunk processed (or failed) by [SingleTranslationPipeline].
+ */
+data class AiChunkDebugLogEntry(
+    val batchNumber: Int,
+    val cueRangeLabel: String,
+    val providerLabel: String,
+    val modelId: String,
+    val strategyUsed: String,
+    val mappedCount: Int,
+    val expectedCount: Int,
+    val rawResponse: String
+)
+
+/**
+ * Exception thrown when an AI response cannot be mapped even after flexible parsing,
+ * format-repair auto-retry, and positional fallback mapping.
+ * Preserves the [debugLogEntry] and raw response snippet so the UI can display it immediately.
+ */
+class SingleTranslationFormatException(
+    message: String,
+    val debugLogEntry: AiChunkDebugLogEntry
+) : IllegalStateException(message)
+
+/**
  * Telemetry record proving that a file (whether via Single Translation or Batch Queue)
  * was processed through [SingleTranslationPipeline] with a specific [SingleTranslationConfig].
  */
@@ -113,7 +137,8 @@ data class SingleTranslationPipelineExecutionReport(
     val translatedCuesCount: Int,
     val chunkRetryCount: Int,
     val mergedContent: String,
-    val validationResult: BatchValidationResult
+    val validationResult: BatchValidationResult,
+    val debugLogs: List<AiChunkDebugLogEntry> = emptyList()
 )
 
 /**
@@ -174,6 +199,31 @@ object SingleTranslationPipeline {
             customPromptInstruction = config.customPromptInstruction,
             glossaryRules = config.glossaryRules
         )
+    }
+
+    /**
+     * Builds an ultra-explicit format-repair System Prompt when the first AI response omitted line numbers.
+     */
+    fun buildStrictFormatRepairPrompt(
+        config: SingleTranslationConfig,
+        chunkCues: List<SubtitleCue>
+    ): String {
+        val basePrompt = buildSystemPrompt(config)
+        val firstId = chunkCues.firstOrNull()?.id ?: 1
+        val lastId = chunkCues.lastOrNull()?.id ?: chunkCues.size
+        val sampleFirst = config.indexFormatMode.formatLine(firstId, "Terjemahan baris pertama...")
+        val sampleLast = config.indexFormatMode.formatLine(lastId, "Terjemahan baris terakhir...")
+        return buildString {
+            appendLine(basePrompt)
+            appendLine()
+            appendLine("PERINGATAN PERBAIKAN FORMAT WAJIB (AUTO-RETRY):")
+            appendLine("- Respons Anda sebelumnya gagal dipetakan karena nomor urut baris tidak ditulis dengan benar.")
+            appendLine("- Anda WAJIB mengawali SETIAP baris hasil terjemahan dengan nomor urut dari #$firstId sampai #$lastId:")
+            appendLine("  $sampleFirst")
+            appendLine("  ...")
+            appendLine("  $sampleLast")
+            appendLine("- JANGAN menulis kalimat sapaan, penjelasan, atau penutup apa pun.")
+        }.trim()
     }
 
     /**
@@ -260,8 +310,8 @@ object SingleTranslationPipeline {
      * when the user translates a single batch tab in Single Translation UI).
      *
      * Every chunk is processed sequentially with identical prompt, model config, chunk size,
-     * response parsing, automatic missing-cue repair within a chunk, glossary post-processing,
-     * subtitle reconstruction, and validation.
+     * multi-stage response parsing, automatic format-repair retry, positional fallback mapping,
+     * missing-cue repair within a chunk, glossary post-processing, subtitle reconstruction, and validation.
      */
     suspend fun executePipeline(
         sourceDocument: SubtitleDocument,
@@ -271,6 +321,7 @@ object SingleTranslationPipeline {
         initialTranslations: Map<Int, String> = emptyMap(),
         shouldAbort: () -> Boolean = { false },
         onChunkStarted: suspend (chunkIndex: Int, totalChunks: Int, chunkCues: List<SubtitleCue>) -> Unit = { _, _, _ -> },
+        onChunkDebugLog: suspend (AiChunkDebugLogEntry) -> Unit = {},
         onChunkTranslated: suspend (
             chunkIndex: Int,
             totalChunks: Int,
@@ -286,9 +337,10 @@ object SingleTranslationPipeline {
 
             val systemPrompt = buildSystemPrompt(config)
             val accumulatedMap = LinkedHashMap<Int, String>(initialTranslations)
+            val recordedDebugLogs = mutableListOf<AiChunkDebugLogEntry>()
             var totalChunkRetries = 0
 
-            for ((stepIdx, chunkIdx) in targetIndices.withIndex()) {
+            for ((_, chunkIdx) in targetIndices.withIndex()) {
                 if (shouldAbort()) {
                     throw IllegalStateException("Proses penerjemahan dihentikan oleh pengguna.")
                 }
@@ -297,6 +349,10 @@ object SingleTranslationPipeline {
                 if (chunkCues.isEmpty()) continue
 
                 onChunkStarted(chunkIdx, allChunks.size, chunkCues)
+
+                val firstId = chunkCues.firstOrNull()?.id ?: 1
+                val lastId = chunkCues.lastOrNull()?.id ?: chunkCues.size
+                val cueRangeLabel = "#$firstId–#$lastId"
 
                 val userLinesText = formatChunkForExtraction(chunkCues, config)
                 val primaryResponse = aiGateway.requestChunkTranslation(
@@ -307,16 +363,92 @@ object SingleTranslationPipeline {
                     throw IllegalStateException(err.message ?: "Gagal menerjemahkan chunk ${chunkIdx + 1}.")
                 }
 
-                val parsedChunk = LinkedHashMap(
-                    SubtitleParserAndMerger.parseAiTranslatedLines(
-                        pastedText = primaryResponse,
-                        expectedCues = chunkCues
-                    )
+                // Stage A & Stage B: Flexible inline & multi-line numbered parsing
+                val initialParseReport = SubtitleParserAndMerger.parseAiTranslatedLinesWithReport(
+                    pastedText = primaryResponse,
+                    expectedCues = chunkCues,
+                    allowPositionalFallback = false
                 )
+                val parsedChunk = LinkedHashMap(initialParseReport.parsedLines)
+                var activeStrategy = initialParseReport.strategyUsed
+                var latestRawResponse = primaryResponse
+
+                // Stage C: Auto-Retry with strict format-lock prompt if Stage A & Stage B found 0 indexed lines
+                if (parsedChunk.isEmpty() && !shouldAbort() && config.maxChunkRepairRetries > 0) {
+                    totalChunkRetries++
+                    val strictRepairPrompt = buildStrictFormatRepairPrompt(config, chunkCues)
+                    val formatRetryResult = aiGateway.requestChunkTranslation(
+                        config = config,
+                        systemPrompt = strictRepairPrompt,
+                        numberedUserLines = userLinesText
+                    ).flattenNestedResult()
+
+                    if (formatRetryResult.isSuccess) {
+                        val retryRawText = formatRetryResult.getOrThrow()
+                        if (retryRawText.isNotBlank()) {
+                            latestRawResponse = retryRawText
+                        }
+                        val retryParseReport = SubtitleParserAndMerger.parseAiTranslatedLinesWithReport(
+                            pastedText = retryRawText,
+                            expectedCues = chunkCues,
+                            allowPositionalFallback = false
+                        )
+                        if (retryParseReport.parsedLines.isNotEmpty()) {
+                            parsedChunk.putAll(retryParseReport.parsedLines)
+                            activeStrategy = "Auto-Retry Format (${retryParseReport.strategyUsed})"
+                        } else {
+                            // Stage D1: Positional Fallback on retry response
+                            val retryFallbackReport = SubtitleParserAndMerger.parseAiTranslatedLinesWithReport(
+                                pastedText = retryRawText,
+                                expectedCues = chunkCues,
+                                allowPositionalFallback = true
+                            )
+                            if (retryFallbackReport.parsedLines.isNotEmpty()) {
+                                parsedChunk.putAll(retryFallbackReport.parsedLines)
+                                activeStrategy = "Auto-Retry + ${retryFallbackReport.strategyUsed}"
+                            }
+                        }
+                    }
+                }
+
+                // Stage D2: Positional Fallback on primary response if still empty
+                if (parsedChunk.isEmpty()) {
+                    val primaryFallbackReport = SubtitleParserAndMerger.parseAiTranslatedLinesWithReport(
+                        pastedText = primaryResponse,
+                        expectedCues = chunkCues,
+                        allowPositionalFallback = true
+                    )
+                    if (primaryFallbackReport.parsedLines.isNotEmpty()) {
+                        parsedChunk.putAll(primaryFallbackReport.parsedLines)
+                        activeStrategy = primaryFallbackReport.strategyUsed
+                    }
+                }
 
                 if (parsedChunk.isEmpty()) {
-                    throw IllegalStateException(
-                        "Respons AI pada Batch ${chunkIdx + 1} tidak memiliki format nomor urut yang valid."
+                    val cleanSnippet = latestRawResponse
+                        .replace("\r\n", " ")
+                        .replace("\n", " ")
+                        .replace(Regex("""\s{2,}"""), " ")
+                        .trim()
+                        .take(180)
+                        .ifEmpty { "(Respons kosong)" }
+
+                    val failedLogEntry = AiChunkDebugLogEntry(
+                        batchNumber = chunkIdx + 1,
+                        cueRangeLabel = cueRangeLabel,
+                        providerLabel = config.aiSettings.preset.displayTitle,
+                        modelId = config.aiSettings.selectedModel,
+                        strategyUsed = "Gagal Parsing (Format Tidak Valid)",
+                        mappedCount = 0,
+                        expectedCount = chunkCues.size,
+                        rawResponse = latestRawResponse
+                    )
+                    recordedDebugLogs.add(failedLogEntry)
+                    onChunkDebugLog(failedLogEntry)
+
+                    throw SingleTranslationFormatException(
+                        message = "Respons AI pada Batch ${chunkIdx + 1} tidak memiliki format nomor urut yang valid. Cuplikan respons AI: \"$cleanSnippet\"",
+                        debugLogEntry = failedLogEntry
                     )
                 }
 
@@ -346,7 +478,8 @@ object SingleTranslationPipeline {
                     if (retryResult.isSuccess) {
                         val repairedLines = SubtitleParserAndMerger.parseAiTranslatedLines(
                             pastedText = retryResult.getOrThrow(),
-                            expectedCues = retryWindowCues
+                            expectedCues = retryWindowCues,
+                            allowPositionalFallback = true
                         )
                         for (missingCue in missingInChunk) {
                             repairedLines[missingCue.id]?.let { parsedChunk[missingCue.id] = it }
@@ -363,6 +496,19 @@ object SingleTranslationPipeline {
                         parsedChunk[cue.id] = cue.cleanText.trim().ifEmpty { "..." }
                     }
                 }
+
+                val successLogEntry = AiChunkDebugLogEntry(
+                    batchNumber = chunkIdx + 1,
+                    cueRangeLabel = cueRangeLabel,
+                    providerLabel = config.aiSettings.preset.displayTitle,
+                    modelId = config.aiSettings.selectedModel,
+                    strategyUsed = activeStrategy,
+                    mappedCount = parsedChunk.size,
+                    expectedCount = chunkCues.size,
+                    rawResponse = latestRawResponse
+                )
+                recordedDebugLogs.add(successLogEntry)
+                onChunkDebugLog(successLogEntry)
 
                 val processedChunk = applyPostProcessing(parsedChunk, config)
                 accumulatedMap.putAll(processedChunk)
@@ -396,7 +542,8 @@ object SingleTranslationPipeline {
                 translatedCuesCount = finalTranslations.size,
                 chunkRetryCount = totalChunkRetries,
                 mergedContent = mergedContent,
-                validationResult = validationResult
+                validationResult = validationResult,
+                debugLogs = recordedDebugLogs
             )
 
             SingleTranslationPipelineResult(
