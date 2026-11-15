@@ -596,10 +596,10 @@ fun ExtractTabScreen(
                 // Button 1: Filter / Jump to Line #
                 Surface(
                     shape = RoundedCornerShape(21.dp),
-                    color = if (isDark) Color(0xFF1F3027) else Color(0xFFE6ECE7),
+                    color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
                     border = BorderStroke(
                         1.dp,
-                        if (isDark) Color(0xFF2D4438) else Color(0xFFD5DFD7)
+                        MaterialTheme.colorScheme.outlineVariant
                     ),
                     modifier = Modifier
                         .height(42.dp)
@@ -624,10 +624,10 @@ fun ExtractTabScreen(
                 // Button 2: Swap / Extraction Rules & Prompt Sheet
                 Surface(
                     shape = RoundedCornerShape(21.dp),
-                    color = if (isDark) Color(0xFF1F3027) else Color(0xFFE6ECE7),
+                    color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
                     border = BorderStroke(
                         1.dp,
-                        if (isDark) Color(0xFF2D4438) else Color(0xFFD5DFD7)
+                        MaterialTheme.colorScheme.outlineVariant
                     ),
                     modifier = Modifier
                         .height(42.dp)
@@ -650,13 +650,13 @@ fun ExtractTabScreen(
             // Right: Soft Sage Green Counter Pill ("120/120")
             Surface(
                 shape = RoundedCornerShape(14.dp),
-                color = if (isDark) Color(0xFF214431) else SageHighlightFill
+                color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else SageHighlightFill
             ) {
                 Text(
                     text = "${uiState.matchedCount}/${uiState.document.cues.size}",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
-                    color = if (isDark) Color(0xFF8CE0AF) else Color(0xFF173F2A),
+                    color = if (isDark) Color(0xFF7BE8A4) else MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
                 )
             }
@@ -706,7 +706,7 @@ private fun ExtractWorkspaceTopBar(
             color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
             border = BorderStroke(
                 1.dp,
-                if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3E9E4)
+                MaterialTheme.colorScheme.outlineVariant
             ),
             modifier = Modifier
                 .fillMaxWidth()
@@ -728,7 +728,7 @@ private fun ExtractWorkspaceTopBar(
                 ) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = if (isDark) Color(0xFF1E3228) else Color(0xFFECF1ED),
+                        color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier.size(40.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -779,7 +779,7 @@ private fun ExtractWorkspaceTopBar(
                     color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
                     border = BorderStroke(
                         1.dp,
-                        if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE0E7E2)
+                        MaterialTheme.colorScheme.outlineVariant
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -845,7 +845,7 @@ private fun ExtractWorkspaceTopBar(
                 color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
                 border = BorderStroke(
                     1.dp,
-                    if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE0E7E2)
+                    MaterialTheme.colorScheme.outlineVariant
                 ),
                 modifier = Modifier
                     .weight(1f)
@@ -1046,15 +1046,15 @@ private fun ExtractCueListItemCard(
     inlineEditorContent: (@Composable () -> Unit)? = null
 ) {
     val bgColor = when {
-        isSelected -> if (isDark) Color(0xFF214431) else SageHighlightFill
+        isSelected -> if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else SageHighlightFill
         isTranslating -> MaterialTheme.colorScheme.secondaryContainer
         else -> if (isDark) MaterialTheme.colorScheme.surface else Color.White
     }
 
     val indexBadgeBg = if (isSelected) {
-        if (isDark) Color(0xFF142A1E) else Color.White.copy(alpha = 0.85f)
+        if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else Color.White.copy(alpha = 0.85f)
     } else {
-        if (isDark) Color(0xFF1E2D24) else Color(0xFFEAEFEA)
+        if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant
     }
 
     Surface(
@@ -1067,7 +1067,7 @@ private fun ExtractCueListItemCard(
             } else if (isDark) {
                 MaterialTheme.colorScheme.outlineVariant
             } else {
-                Color(0xFFE4EAE5)
+                MaterialTheme.colorScheme.surfaceVariant
             }
         ),
         modifier = Modifier
@@ -1155,7 +1155,7 @@ private fun ExtractCueListItemCard(
                             .size(22.dp)
                             .clip(CircleShape)
                             .background(
-                                if (isDark) Color(0xFF25352C) else Color(0xFFE8EFE9)
+                                if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant
                             ),
                         contentAlignment = Alignment.Center
                     ) {
@@ -1313,7 +1313,7 @@ private fun ActiveCueTranslationInspectorCard(
                     // Teks Asli Metadata & Raw Tag View
                     Surface(
                         shape = RoundedCornerShape(14.dp),
-                        color = if (isDark) Color(0xFF1B2E24) else SageSoftCardFill,
+                        color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else SageSoftCardFill,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
@@ -1351,8 +1351,8 @@ private fun ActiveCueTranslationInspectorCard(
                         },
                         shape = RoundedCornerShape(14.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = if (isDark) Color(0xFF1B2E24) else SageSoftCardFill,
-                            unfocusedContainerColor = if (isDark) Color(0xFF1B2E24) else SageSoftCardFill,
+                            focusedContainerColor = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else SageSoftCardFill,
+                            unfocusedContainerColor = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else SageSoftCardFill,
                             focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
                             unfocusedBorderColor = Color.Transparent
                         ),

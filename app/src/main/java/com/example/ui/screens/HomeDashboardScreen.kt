@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,13 +33,13 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -49,20 +50,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.BuildConfig
 import com.example.model.BatchQueueState
-import com.example.ui.theme.HomeHighlightGreenBottom
-import com.example.ui.theme.HomeHighlightGreenTop
-import com.example.ui.theme.HomeHighlightMintBorder
-import com.example.ui.theme.HomeTileAlabaster
+import com.example.ui.theme.FrontierMonoFamily
 import com.example.viewmodel.SubtitleUiState
 
 /**
- * Screen 3 of the Locked 10-Screen Reference Design:
- * Deep Forest Green Home Dashboard with:
- * - Top Brand Header (`// SubAI v1.x.x` + Settings gear)
- * - 2x2 Grid (`Ekstrak & Terjemahkan` highlighted green, `Paste AI`, `Find & Kamus`, `Merge`)
- * - Full-width `Batch Queue` card
- * - Full-width Recent File card (`KonoSuba_E01.ass • 120 dialog - Baru saja`)
- * - Bottom rounded Alabaster Dock (`Home`, `History/Batch`, `Folder`, `Profile/AI`)
+ * Frontier home dashboard.
+ *
+ * Paper-white canvas, near-black ink, hairline cards and one dark emphasis card —
+ * the same language as the extracted reference design:
+ *  - brand row (mark + wordmark + version)
+ *  - 2x2 feature grid (one ink tile, three paper tiles)
+ *  - dark batch queue card
+ *  - recent file card
+ *  - floating capsule navigation dock
  */
 @Composable
 fun HomeDashboardScreen(
@@ -74,18 +74,12 @@ fun HomeDashboardScreen(
     onReplayIntro: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val scheme = MaterialTheme.colorScheme
+
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF122D21),
-                        Color(0xFF17382A),
-                        Color(0xFF122B20)
-                    )
-                )
-            )
+            .background(scheme.background)
             .testTag("home_dashboard_screen"),
         contentAlignment = Alignment.TopCenter
     ) {
@@ -93,21 +87,20 @@ fun HomeDashboardScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .widthIn(max = 540.dp)
-                .padding(horizontal = 18.dp, vertical = 10.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Scrollable Upper Content (Header + 2x2 Grid + Batch Queue + Recent File)
             Column(
                 modifier = Modifier
                     .weight(1f)
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // 1. Top Brand Header Row matching Screen 3
+                // 1. Brand row
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 4.dp, bottom = 6.dp),
+                        .padding(top = 6.dp, bottom = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -120,48 +113,54 @@ fun HomeDashboardScreen(
                             .padding(vertical = 4.dp, horizontal = 2.dp)
                     ) {
                         SubAiParallelogramLogo(
-                            color = Color.White,
-                            modifier = Modifier.size(28.dp)
+                            color = scheme.onBackground,
+                            modifier = Modifier.size(26.dp)
                         )
-                        Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             Text(
                                 text = "SubAI",
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                lineHeight = 22.sp
+                                style = MaterialTheme.typography.headlineSmall,
+                                color = scheme.onBackground
                             )
                             Text(
                                 text = "v${BuildConfig.VERSION_NAME}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color(0xFFA7C4B5),
+                                fontFamily = FrontierMonoFamily,
+                                fontSize = 10.sp,
+                                color = scheme.onSurfaceVariant,
                                 modifier = Modifier.testTag("home_version_badge")
                             )
                         }
                     }
 
-                    IconButton(
-                        onClick = onOpenSettings,
-                        modifier = Modifier
-                            .size(42.dp)
-                            .testTag("open_theme_settings_button")
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = scheme.surfaceVariant,
+                        modifier = Modifier.size(38.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Settings,
-                            contentDescription = "Pengaturan",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
+                        IconButton(
+                            onClick = onOpenSettings,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("open_theme_settings_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Settings,
+                                contentDescription = "Pengaturan",
+                                tint = scheme.onBackground,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
                     }
                 }
 
-                // 2. 2x2 Feature Cards Grid matching Screen 3
+                // 2. Feature grid
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Top-Left: Highlighted Green Card ("Ekstrak & Terjemahkan")
                     HomeSquareFeatureTile(
                         title = "Ekstrak\n& Terjemahkan",
                         icon = Icons.Default.NorthEast,
@@ -170,8 +169,6 @@ fun HomeDashboardScreen(
                         onClick = { onNavigateToTab(0) },
                         modifier = Modifier.weight(1f)
                     )
-
-                    // Top-Right: Light Alabaster Card ("Paste AI")
                     HomeSquareFeatureTile(
                         title = "Paste AI",
                         icon = Icons.Outlined.ContentPaste,
@@ -184,9 +181,8 @@ fun HomeDashboardScreen(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Bottom-Left: Light Alabaster Card ("Find & Kamus")
                     HomeSquareFeatureTile(
                         title = "Find & Kamus",
                         icon = Icons.Outlined.Search,
@@ -195,8 +191,6 @@ fun HomeDashboardScreen(
                         onClick = { onNavigateToTab(2) },
                         modifier = Modifier.weight(1f)
                     )
-
-                    // Bottom-Right: Light Alabaster Card ("Merge")
                     HomeSquareFeatureTile(
                         title = "Merge",
                         icon = Icons.Outlined.Layers,
@@ -207,76 +201,103 @@ fun HomeDashboardScreen(
                     )
                 }
 
-                // 3. Full-Width Horizontal Card: "Batch Queue" matching Screen 3
+                // 3. Dark batch queue card
                 Surface(
-                    shape = RoundedCornerShape(22.dp),
-                    color = HomeTileAlabaster,
-                    shadowElevation = 2.dp,
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.inverseSurface,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(74.dp)
-                        .clip(RoundedCornerShape(22.dp))
+                        .clip(RoundedCornerShape(18.dp))
                         .clickable { onNavigateToTab(4) }
                         .testTag("home_card_batch")
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 20.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Row(
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Layers,
-                                contentDescription = "Batch Queue",
-                                tint = Color(0xFF173327),
-                                modifier = Modifier.size(28.dp)
+                            Text(
+                                text = "Batch Queue",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.inverseOnSurface
                             )
-                            Column {
-                                Text(
-                                    text = "Batch Queue",
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF173327)
-                                )
-                                if (batchState.totalFiles > 0) {
-                                    Text(
-                                        text = "${batchState.completedCount}/${batchState.totalFiles} file selesai",
-                                        fontSize = 12.sp,
-                                        color = Color(0xFF4E665A)
+                            Text(
+                                text = "${batchState.completedCount}/${batchState.totalFiles} file",
+                                fontFamily = FrontierMonoFamily,
+                                fontSize = 10.5.sp,
+                                color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.65f)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val total = batchState.totalFiles.coerceAtLeast(1)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(4.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.22f))
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .fillMaxWidth(
+                                                (batchState.completedCount.toFloat() / total).coerceIn(0f, 1f)
+                                            )
+                                            .clip(RoundedCornerShape(50))
+                                            .background(MaterialTheme.colorScheme.inverseOnSurface)
                                     )
                                 }
                             }
                         }
 
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = Color(0xFF5A6D63),
-                            modifier = Modifier.size(22.dp)
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Layers,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.65f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.inverseOnSurface,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
 
-                // 4. Full-Width Recent File Card matching Screen 3 ("KonoSuba_E01.ass • 120 dialog - Baru saja")
+                // 4. Recent file card
                 Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = Color(0xFFE5ECE7),
-                    shadowElevation = 2.dp,
+                    shape = RoundedCornerShape(16.dp),
+                    color = scheme.surface,
+                    border = BorderStroke(1.dp, scheme.outlineVariant),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(16.dp))
                         .clickable { onNavigateToTab(0) }
                         .testTag("home_recent_file_card")
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -286,11 +307,11 @@ fun HomeDashboardScreen(
                             modifier = Modifier.weight(1f)
                         ) {
                             Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = Color(0xFFD4E0D8),
+                                shape = RoundedCornerShape(11.dp),
+                                color = scheme.surfaceVariant,
                                 modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(11.dp))
                                     .clickable { onOpenFilePicker() }
                                     .testTag("home_open_file_button")
                             ) {
@@ -298,8 +319,8 @@ fun HomeDashboardScreen(
                                     Icon(
                                         imageVector = Icons.Outlined.Folder,
                                         contentDescription = "Buka File Subtitle",
-                                        tint = Color(0xFF173327),
-                                        modifier = Modifier.size(22.dp)
+                                        tint = scheme.onSurface,
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -308,20 +329,20 @@ fun HomeDashboardScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .padding(end = 8.dp),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                                verticalArrangement = Arrangement.spacedBy(3.dp)
                             ) {
                                 Text(
                                     text = uiState.document.fileName,
-                                    fontSize = 14.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF173327),
+                                    fontFamily = FrontierMonoFamily,
+                                    fontSize = 12.sp,
+                                    color = scheme.onSurface,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "${uiState.document.cues.size} dialog - Baru saja",
-                                    fontSize = 12.sp,
-                                    color = Color(0xFF4F6359),
+                                    text = "${uiState.document.cues.size} dialog · baru saja",
+                                    fontSize = 11.5.sp,
+                                    color = scheme.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -331,38 +352,37 @@ fun HomeDashboardScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                             contentDescription = "Buka File",
-                            tint = Color(0xFF5A6D63),
-                            modifier = Modifier.size(20.dp)
+                            tint = scheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // 5. Bottom Rounded Alabaster Navigation Dock matching Screen 3
+            // 5. Floating capsule dock
             Surface(
-                shape = RoundedCornerShape(26.dp),
-                color = Color(0xFFEEF2EE),
-                shadowElevation = 4.dp,
+                shape = RoundedCornerShape(22.dp),
+                color = scheme.surface,
+                border = BorderStroke(1.dp, scheme.outlineVariant),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(62.dp)
+                    .height(58.dp)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 18.dp),
+                        .padding(horizontal = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 1. Active Home Pill (Solid Forest Green Pill with White Home Icon)
                     Box(
                         modifier = Modifier
                             .width(52.dp)
-                            .height(38.dp)
-                            .clip(RoundedCornerShape(19.dp))
-                            .background(Color(0xFF236441))
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(17.dp))
+                            .background(scheme.primary)
                             .clickable { onNavigateToTab(-1) }
                             .testTag("nav_tab_home"),
                         contentAlignment = Alignment.Center
@@ -370,12 +390,11 @@ fun HomeDashboardScreen(
                         Icon(
                             imageVector = Icons.Filled.Home,
                             contentDescription = "Beranda",
-                            tint = Color.White,
-                            modifier = Modifier.size(21.dp)
+                            tint = scheme.onPrimary,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
 
-                    // 2. History / Batch Queue Icon
                     IconButton(
                         onClick = { onNavigateToTab(4) },
                         modifier = Modifier.testTag("nav_tab_batch")
@@ -383,12 +402,11 @@ fun HomeDashboardScreen(
                         Icon(
                             imageVector = Icons.Outlined.History,
                             contentDescription = "Riwayat & Batch Queue",
-                            tint = Color(0xFF23382E),
-                            modifier = Modifier.size(23.dp)
+                            tint = scheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
-                    // 3. Folder / Open Subtitle File Picker Icon
                     IconButton(
                         onClick = onOpenFilePicker,
                         modifier = Modifier.testTag("home_dock_open_file")
@@ -396,12 +414,11 @@ fun HomeDashboardScreen(
                         Icon(
                             imageVector = Icons.Outlined.Folder,
                             contentDescription = "Pilih File Subtitle",
-                            tint = Color(0xFF23382E),
-                            modifier = Modifier.size(23.dp)
+                            tint = scheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
-                    // 4. Profile / AI Provider & Settings Icon
                     IconButton(
                         onClick = onOpenSettings,
                         modifier = Modifier.testTag("home_dock_settings")
@@ -409,8 +426,8 @@ fun HomeDashboardScreen(
                         Icon(
                             imageVector = Icons.Outlined.PersonOutline,
                             contentDescription = "Profil AI & Pengaturan",
-                            tint = Color(0xFF23382E),
-                            modifier = Modifier.size(24.dp)
+                            tint = scheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
@@ -428,53 +445,39 @@ private fun HomeSquareFeatureTile(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val bgModifier = if (isHighlighted) {
-        Modifier.background(
-            Brush.verticalGradient(
-                colors = listOf(HomeHighlightGreenTop, HomeHighlightGreenBottom)
-            )
-        )
-    } else {
-        Modifier.background(HomeTileAlabaster)
-    }
-
-    val contentColor = if (isHighlighted) Color.White else Color(0xFF173327)
-    val borderStroke = if (isHighlighted) {
-        BorderStroke(1.5.dp, HomeHighlightMintBorder)
-    } else {
-        null
-    }
+    val scheme = MaterialTheme.colorScheme
+    val containerColor = if (isHighlighted) scheme.primary else scheme.surface
+    val contentColor = if (isHighlighted) scheme.onPrimary else scheme.onSurface
+    val borderStroke = if (isHighlighted) null else BorderStroke(1.dp, scheme.outlineVariant)
 
     Surface(
-        shape = RoundedCornerShape(22.dp),
-        color = Color.Transparent,
+        shape = RoundedCornerShape(18.dp),
+        color = containerColor,
         border = borderStroke,
-        shadowElevation = if (isHighlighted) 6.dp else 2.dp,
         modifier = modifier
-            .height(126.dp)
-            .clip(RoundedCornerShape(22.dp))
-            .then(bgModifier)
+            .height(118.dp)
+            .clip(RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
             .testTag(testTag)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 18.dp, vertical = 16.dp),
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = title,
                 tint = contentColor,
-                modifier = Modifier.size(26.dp)
+                modifier = Modifier.size(22.dp)
             )
 
             Text(
                 text = title,
-                fontSize = 15.5.sp,
-                lineHeight = 20.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                lineHeight = 19.sp,
+                fontWeight = FontWeight.Medium,
                 color = contentColor,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
@@ -492,7 +495,6 @@ fun SubAiParallelogramLogo(
         val w = size.width
         val h = size.height
 
-        // Left slanted bar
         val bar1 = Path().apply {
             moveTo(w * 0.25f, h * 0.12f)
             lineTo(w * 0.50f, h * 0.12f)
@@ -500,7 +502,6 @@ fun SubAiParallelogramLogo(
             lineTo(w * 0.05f, h * 0.88f)
             close()
         }
-        // Right slanted bar
         val bar2 = Path().apply {
             moveTo(w * 0.62f, h * 0.12f)
             lineTo(w * 0.87f, h * 0.12f)

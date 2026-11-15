@@ -460,19 +460,24 @@ private fun SecondaryScreenForestHeader(
         ) {
             IconButton(
                 onClick = onBackToHome,
-                modifier = Modifier.testTag("topbar_back_to_home_button")
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .testTag("topbar_back_to_home_button")
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Kembali ke Beranda",
-                    tint = Color.White
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(17.dp)
                 )
             }
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(10.dp))
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.Medium,
                 color = Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -679,8 +684,8 @@ private fun ForestRailIconItem(
     testTag: String,
     onClick: () -> Unit
 ) {
-    val bg = if (selected) Color(0xFF2D5E46) else Color.Transparent
-    val tint = if (selected) Color(0xFFB7EFC5) else Color.White.copy(alpha = 0.78f)
+    val bg = if (selected) Color(0xFF1E1E1C) else Color.Transparent
+    val tint = if (selected) Color.White else Color.White.copy(alpha = 0.68f)
 
     Box(
         modifier = Modifier

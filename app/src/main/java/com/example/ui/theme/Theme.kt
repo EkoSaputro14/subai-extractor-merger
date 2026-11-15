@@ -2,8 +2,10 @@ package com.example.ui.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -11,60 +13,82 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import com.example.model.ColorPreset
 import com.example.model.ThemeMode
 import com.example.model.ThemeSettings
+
+/** Frontier geometry: paper cards, pill controls, hairline borders. */
+val FrontierShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(28.dp)
+)
 
 private fun buildPresetColorScheme(
     preset: ColorPreset,
     darkTheme: Boolean
 ): ColorScheme {
+    val accent = if (darkTheme) preset.darkPrimary else preset.lightPrimary
+    val accentSecondary = if (darkTheme) preset.darkSecondary else preset.lightSecondary
+
     return if (darkTheme) {
         darkColorScheme(
-            primary = preset.darkPrimary,
-            onPrimary = Color(0xFF071D12),
-            primaryContainer = preset.darkPrimary.copy(alpha = 0.22f),
-            onPrimaryContainer = preset.darkPrimary,
-            secondary = preset.darkSecondary,
-            onSecondary = Color(0xFF071D12),
-            secondaryContainer = preset.darkSecondary.copy(alpha = 0.22f),
-            onSecondaryContainer = preset.darkSecondary,
-            tertiary = Color(0xFFFFD584),
-            background = DarkBackground,
-            onBackground = Color(0xFFE8F1EC),
-            surface = DarkSurface,
-            onSurface = Color(0xFFE8F1EC),
-            surfaceContainer = Color(0xFF192720),
-            surfaceContainerLow = Color(0xFF141F1A),
-            surfaceContainerHigh = Color(0xFF213229),
-            surfaceVariant = DarkSurfaceVariant,
-            onSurfaceVariant = Color(0xFFB5C7BD),
-            outline = Color(0xFF3A4D42),
-            outlineVariant = Color(0xFF28382F)
+            primary = XaiDarkOnBg,
+            onPrimary = XaiDarkBackground,
+            primaryContainer = XaiDarkSurfaceVariant,
+            onPrimaryContainer = XaiDarkOnBg,
+            secondary = accent,
+            onSecondary = XaiDarkBackground,
+            secondaryContainer = accent.copy(alpha = 0.20f),
+            onSecondaryContainer = accent,
+            tertiary = XaiAccent,
+            onTertiary = XaiDarkBackground,
+            background = XaiDarkBackground,
+            onBackground = XaiDarkOnBg,
+            surface = XaiDarkSurface,
+            onSurface = XaiDarkOnBg,
+            surfaceContainer = XaiDarkSurfaceVariant,
+            surfaceContainerLow = XaiDarkSurface,
+            surfaceContainerHigh = Color(0xFF242422),
+            surfaceVariant = XaiDarkSurfaceVariant,
+            onSurfaceVariant = XaiDarkOnSurfaceVariant,
+            outline = XaiDarkBorder,
+            outlineVariant = XaiDarkBorder,
+            inverseSurface = XaiDarkOnBg,
+            inverseOnSurface = XaiDarkBackground,
+            error = XaiDanger,
+            onError = Color.White
         )
     } else {
-        val isForestPreset = preset == ColorPreset.EMERALD_ANIME
         lightColorScheme(
-            primary = preset.lightPrimary,
+            primary = XaiInk,
             onPrimary = Color.White,
-            primaryContainer = if (isForestPreset) SageHighlightFill else preset.lightPrimary.copy(alpha = 0.16f),
-            onPrimaryContainer = if (isForestPreset) Color(0xFF0F291E) else preset.lightPrimary,
-            secondary = preset.lightSecondary,
+            primaryContainer = XaiSurfaceVariant,
+            onPrimaryContainer = XaiInk,
+            secondary = accentSecondary.takeIf { preset == ColorPreset.MONO_FRONTIER } ?: accent,
             onSecondary = Color.White,
-            secondaryContainer = if (isForestPreset) SageSoftCardFill else preset.lightSecondary.copy(alpha = 0.15f),
-            onSecondaryContainer = if (isForestPreset) Color(0xFF163527) else preset.lightSecondary,
-            tertiary = RetryAmberOrange,
-            background = LightBackground,
-            onBackground = Color(0xFF141D18),
-            surface = LightSurface,
-            onSurface = Color(0xFF141D18),
-            surfaceContainer = Color(0xFFF0F4F1),
-            surfaceContainerLow = Color(0xFFF6F8F6),
-            surfaceContainerHigh = Color(0xFFE7EDE9),
-            surfaceVariant = LightSurfaceVariant,
-            onSurfaceVariant = Color(0xFF4A5950),
-            outline = Color(0xFFBCC7C0),
-            outlineVariant = Color(0xFFDCE3DF)
+            secondaryContainer = XaiSurfaceVariant,
+            onSecondaryContainer = XaiInk,
+            tertiary = XaiAccent,
+            onTertiary = Color.White,
+            background = XaiBackground,
+            onBackground = XaiInk,
+            surface = XaiSurface,
+            onSurface = XaiInk,
+            surfaceContainer = XaiSurface,
+            surfaceContainerLow = XaiBackground,
+            surfaceContainerHigh = XaiSurfaceVariant,
+            surfaceVariant = XaiSurfaceVariant,
+            onSurfaceVariant = XaiInkMuted,
+            outline = XaiBorderStrong,
+            outlineVariant = XaiBorder,
+            inverseSurface = XaiInk,
+            inverseOnSurface = Color(0xFFF5F5F2),
+            error = XaiDanger,
+            onError = Color.White
         )
     }
 }
@@ -104,6 +128,7 @@ fun SubAiExtractorTheme(
     MaterialTheme(
         colorScheme = finalScheme,
         typography = Typography,
+        shapes = FrontierShapes,
         content = content
     )
 }

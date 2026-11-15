@@ -163,7 +163,7 @@ fun BatchQueueTabScreen(
                                 0f
                             }
                             val ringColor = EmeraldCheckGreen
-                            val trackColor = if (isDark) Color(0xFF23352B) else Color(0xFFDCE5DF)
+                            val trackColor = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant
 
                             Canvas(modifier = Modifier.fillMaxSize()) {
                                 val strokeWidth = 8.dp.toPx()
@@ -338,7 +338,7 @@ fun BatchQueueTabScreen(
                     ),
                     border = BorderStroke(
                         1.dp,
-                        if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE2E8E3)
+                        MaterialTheme.colorScheme.outlineVariant
                     )
                 ) {
                     Column(
@@ -546,7 +546,7 @@ fun BatchQueueTabScreen(
                         shape = RoundedCornerShape(18.dp),
                         border = BorderStroke(
                             1.dp,
-                            if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE2E8E3)
+                            MaterialTheme.colorScheme.outlineVariant
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -699,7 +699,7 @@ private fun BatchBottomActionRow(
                 ),
                 border = BorderStroke(
                     1.dp,
-                    if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFDCE4DF)
+                    MaterialTheme.colorScheme.outlineVariant
                 ),
                 modifier = Modifier
                     .weight(1f)
@@ -823,7 +823,7 @@ private fun BatchQueueJobItemCard(
             } else if (isDark) {
                 MaterialTheme.colorScheme.outlineVariant
             } else {
-                Color(0xFFE3EAE5)
+                MaterialTheme.colorScheme.surfaceVariant
             }
         ),
         colors = CardDefaults.cardColors(
@@ -880,7 +880,7 @@ private fun BatchQueueJobItemCard(
                             LinearProgressIndicator(
                                 progress = { cueFrac },
                                 color = EmeraldCheckGreen,
-                                trackColor = if (isDark) Color(0xFF22352A) else Color(0xFFDCE5DF),
+                                trackColor = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
                                 modifier = Modifier
                                     .fillMaxWidth(0.88f)
                                     .height(5.dp)

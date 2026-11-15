@@ -180,10 +180,10 @@ fun AiProviderDetailScreenContent(
         // 1. Top Banner Card matching Screen 2A of Reference Image
         Surface(
             shape = RoundedCornerShape(20.dp),
-            color = if (isDark) Color(0xFF1A2C22) else Color(0xFFE7EFE9),
+            color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
             border = BorderStroke(
                 1.dp,
-                if (isDark) Color(0xFF2B4536) else Color(0xFFD6E3D9)
+                MaterialTheme.colorScheme.outlineVariant
             ),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -202,8 +202,7 @@ fun AiProviderDetailScreenContent(
                     // Green rounded square SubAI logo icon
                     Surface(
                         shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF1F5D3D),
-                        shadowElevation = 2.dp,
+                        color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(48.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -263,7 +262,7 @@ fun AiProviderDetailScreenContent(
             color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
             border = BorderStroke(
                 1.dp,
-                if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3E9E4)
+                MaterialTheme.colorScheme.outlineVariant
             ),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -310,7 +309,7 @@ fun AiProviderDetailScreenContent(
             color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
             border = BorderStroke(
                 1.dp,
-                if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3E9E4)
+                MaterialTheme.colorScheme.outlineVariant
             ),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -362,7 +361,7 @@ fun AiProviderDetailScreenContent(
                         // Soft Sage Status Box: [ ✓ Cookie tersimpan / Login: eko***@gmail.com   [ ↻ Verifikasi ] ]
                         Surface(
                             shape = RoundedCornerShape(14.dp),
-                            color = if (isDark) Color(0xFF1E3528) else Color(0xFFE1EFE4),
+                            color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
@@ -414,10 +413,10 @@ fun AiProviderDetailScreenContent(
 
                                 Surface(
                                     shape = RoundedCornerShape(18.dp),
-                                    color = if (isDark) Color(0xFF284234) else Color.White,
+                                    color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else Color.White,
                                     border = BorderStroke(
                                         1.dp,
-                                        if (isDark) Color(0xFF395B48) else Color(0xFFD0DDD3)
+                                        MaterialTheme.colorScheme.outlineVariant
                                     ),
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(18.dp))
@@ -493,10 +492,10 @@ fun AiProviderDetailScreenContent(
 
                             Surface(
                                 shape = RoundedCornerShape(14.dp),
-                                color = if (isDark) Color(0xFF1F3027) else Color(0xFFF6F8F6),
+                                color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
                                 border = BorderStroke(
                                     1.dp,
-                                    if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFD8E0D9)
+                                    MaterialTheme.colorScheme.outlineVariant
                                 ),
                                 modifier = Modifier
                                     .weight(0.85f)
@@ -665,10 +664,10 @@ fun AiProviderDetailScreenContent(
                             Box {
                                 Surface(
                                     shape = RoundedCornerShape(14.dp),
-                                    color = if (isDark) Color(0xFF1F3027) else Color(0xFFF6F8F6),
+                                    color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
                                     border = BorderStroke(
                                         1.dp,
-                                        if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFDFE6E0)
+                                        MaterialTheme.colorScheme.outlineVariant
                                     ),
                                     modifier = Modifier
                                         .width(205.dp)
@@ -752,10 +751,10 @@ fun AiProviderDetailScreenContent(
                             Box {
                                 Surface(
                                     shape = RoundedCornerShape(14.dp),
-                                    color = if (isDark) Color(0xFF1F3027) else Color(0xFFF6F8F6),
+                                    color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
                                     border = BorderStroke(
                                         1.dp,
-                                        if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFDFE6E0)
+                                        MaterialTheme.colorScheme.outlineVariant
                                     ),
                                     modifier = Modifier
                                         .width(205.dp)
@@ -830,10 +829,10 @@ fun AiProviderDetailScreenContent(
                             Box {
                                 Surface(
                                     shape = RoundedCornerShape(14.dp),
-                                    color = if (isDark) Color(0xFF1F3027) else Color(0xFFF6F8F6),
+                                    color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
                                     border = BorderStroke(
                                         1.dp,
-                                        if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFDFE6E0)
+                                        MaterialTheme.colorScheme.outlineVariant
                                     ),
                                     modifier = Modifier
                                         .width(205.dp)
@@ -954,7 +953,7 @@ fun ThemeAppearanceDetailScreenContent(
             color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
             border = BorderStroke(
                 1.dp,
-                if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3E9E4)
+                MaterialTheme.colorScheme.outlineVariant
             ),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -1127,7 +1126,7 @@ fun ThemeAppearanceDetailScreenContent(
             color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
             border = BorderStroke(
                 1.dp,
-                if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3E9E4)
+                MaterialTheme.colorScheme.outlineVariant
             ),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -1179,7 +1178,7 @@ fun ThemeAppearanceDetailScreenContent(
             color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
             border = BorderStroke(
                 1.dp,
-                if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3E9E4)
+                MaterialTheme.colorScheme.outlineVariant
             ),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -1234,10 +1233,10 @@ fun ThemeAppearanceDetailScreenContent(
                     Box {
                         Surface(
                             shape = RoundedCornerShape(14.dp),
-                            color = if (isDark) Color(0xFF1F3027) else Color(0xFFF6F8F6),
+                            color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
                             border = BorderStroke(
                                 1.dp,
-                                if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFDFE6E0)
+                                MaterialTheme.colorScheme.outlineVariant
                             ),
                             modifier = Modifier
                                 .width(136.dp)
@@ -1352,7 +1351,7 @@ fun ThemeAppearanceDetailScreenContent(
                             val isSelected = themeSettings.editorFontSizeSp == spSize
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
-                                color = if (isSelected) Color(0xFFDDF1E0) else Color.Transparent,
+                                color = if (isSelected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable { viewModel.updateEditorFontSizeSp(spSize) }
@@ -1373,10 +1372,10 @@ fun ThemeAppearanceDetailScreenContent(
                 // Bottom Preview Box: [01] Contoh teks subtitle... / [02] Contoh terjemahan...
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = if (isDark) Color(0xFF1A2921) else Color(0xFFF1F4F1),
+                    color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
                     border = BorderStroke(
                         1.dp,
-                        if (isDark) Color(0xFF2B3F33) else Color(0xFFE2E7E2)
+                        MaterialTheme.colorScheme.outlineVariant
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -1465,7 +1464,7 @@ fun AppUpdateDetailScreenContent(
             color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
             border = BorderStroke(
                 1.dp,
-                if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3E9E4)
+                MaterialTheme.colorScheme.outlineVariant
             ),
             modifier = Modifier
                 .fillMaxWidth()
@@ -1480,7 +1479,7 @@ fun AppUpdateDetailScreenContent(
                 // Soft Green Highlight Banner inside Card
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = if (isDark) Color(0xFF1F3E2C) else Color(0xFFDCF2DF),
+                    color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag(
@@ -1660,7 +1659,7 @@ fun AppUpdateDetailScreenContent(
                     enabled = !updateState.isDownloadingApk,
                     shape = RoundedCornerShape(25.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF1F6E43),
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                         contentColor = Color.White
                     ),
                     modifier = Modifier
@@ -1689,7 +1688,7 @@ fun AppUpdateDetailScreenContent(
             color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
             border = BorderStroke(
                 1.dp,
-                if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3E9E4)
+                MaterialTheme.colorScheme.outlineVariant
             ),
             modifier = Modifier
                 .fillMaxWidth()
@@ -1752,7 +1751,7 @@ fun AppUpdateDetailScreenContent(
             color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
             border = BorderStroke(
                 1.dp,
-                if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3E9E4)
+                MaterialTheme.colorScheme.outlineVariant
             ),
             modifier = Modifier
                 .fillMaxWidth()
@@ -1806,8 +1805,8 @@ private fun RocketUpdateHeroBanner(
 ) {
     Surface(
         shape = RoundedCornerShape(22.dp),
-        color = Color(0xFF193C2C),
-        border = BorderStroke(1.dp, Color(0xFF2D6048)),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceContainerHigh),
         modifier = Modifier.fillMaxWidth()
     ) {
         Box(
@@ -1843,17 +1842,17 @@ private fun RocketUpdateHeroBanner(
 
                 // Soft clouds at bottom-right
                 drawCircle(
-                    color = Color(0xFFD5E6DC).copy(alpha = 0.35f),
+                    color = Color(0xFFE9E7E2).copy(alpha = 0.35f),
                     radius = h * 0.28f,
                     center = Offset(w * 0.65f, h * 0.96f)
                 )
                 drawCircle(
-                    color = Color(0xFFE3F0E8).copy(alpha = 0.45f),
+                    color = Color(0xFFE9E7E2).copy(alpha = 0.45f),
                     radius = h * 0.34f,
                     center = Offset(w * 0.80f, h * 0.94f)
                 )
                 drawCircle(
-                    color = Color(0xFFD5E6DC).copy(alpha = 0.40f),
+                    color = Color(0xFFE9E7E2).copy(alpha = 0.40f),
                     radius = h * 0.26f,
                     center = Offset(w * 0.94f, h * 0.92f)
                 )
@@ -1975,7 +1974,7 @@ private fun AiProviderListRow(
     onClick: () -> Unit
 ) {
     val bg = if (selected) {
-        if (isDark) Color(0xFF1F422E) else Color(0xFFDDF1E0)
+        if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant
     } else {
         Color.Transparent
     }
@@ -2020,7 +2019,7 @@ private fun AiProviderListRow(
                 if (preset == AiProviderPreset.GEMINI_WEB_COOKIE) {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = if (isDark) Color(0xFF28593E) else Color(0xFFC3E8CB)
+                        color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant
                     ) {
                         Text(
                             text = "Gratis",
@@ -2259,7 +2258,7 @@ private fun ThemeModeSegmentCard(
     val bg = if (selected) {
         PrimaryForestButton
     } else {
-        if (isDark) Color(0xFF1E2D24) else Color(0xFFF3F6F3)
+        if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant
     }
     val fg = if (selected) {
         Color.White
@@ -2273,7 +2272,7 @@ private fun ThemeModeSegmentCard(
         border = if (!selected) {
             BorderStroke(
                 1.dp,
-                if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE0E6E1)
+                MaterialTheme.colorScheme.outlineVariant
             )
         } else null,
         modifier = modifier
@@ -2405,7 +2404,7 @@ private fun StudioWavyColorSwatchItem(
 private fun GitHubOctocatIcon(modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         drawCircle(
-            color = Color(0xFF1F2328),
+            color = Color(0xFF141413),
             radius = size.width * 0.46f,
             center = Offset(size.width * 0.5f, size.height * 0.5f)
         )

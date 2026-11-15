@@ -388,6 +388,15 @@ enum class ColorPreset(
     val lightSecondary: Color,
     val swatchColor: Color
 ) {
+    MONO_FRONTIER(
+        presetName = "Frontier Mono",
+        subtitleDesc = "Hitam-putih tegas dengan aksen oranye khas Frontier",
+        darkPrimary = Color(0xFFF5F5F2),
+        lightPrimary = Color(0xFF0A0A0A),
+        darkSecondary = Color(0xFFFF7A3D),
+        lightSecondary = Color(0xFFFF5C1A),
+        swatchColor = Color(0xFFFF5C1A)
+    ),
     EMERALD_ANIME(
         presetName = "Forest Sage",
         subtitleDesc = "Hijau hutan & sage lembut khas SubAI Studio",
@@ -444,7 +453,7 @@ enum class EditorFontSizeOption(val label: String, val shortLabel: String, val s
 
 data class ThemeSettings(
     val themeMode: ThemeMode = ThemeMode.LIGHT,
-    val colorPreset: ColorPreset = ColorPreset.EMERALD_ANIME,
+    val colorPreset: ColorPreset = ColorPreset.MONO_FRONTIER,
     val useDynamicColor: Boolean = false,
     val pureBlackAmoled: Boolean = false,
     val editorFontSizeSp: Int = 16,

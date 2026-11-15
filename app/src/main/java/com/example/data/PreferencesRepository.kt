@@ -30,8 +30,8 @@ class PreferencesRepository(context: Context) {
                 ThemeMode.valueOf(obj.optString("themeMode", ThemeMode.LIGHT.name))
             }.getOrDefault(ThemeMode.LIGHT)
             val colorPreset = runCatching {
-                ColorPreset.valueOf(obj.optString("colorPreset", ColorPreset.EMERALD_ANIME.name))
-            }.getOrDefault(ColorPreset.EMERALD_ANIME)
+                ColorPreset.valueOf(obj.optString("colorPreset", ColorPreset.MONO_FRONTIER.name))
+            }.getOrDefault(ColorPreset.MONO_FRONTIER)
             ThemeSettings(
                 themeMode = themeMode,
                 colorPreset = colorPreset,

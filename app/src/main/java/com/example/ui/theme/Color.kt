@@ -2,36 +2,82 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// SubAI Forest Sage & Alabaster Studio Surfaces (extracted from 10-Screen Reference Design)
-val DarkBackground = Color(0xFF0E1612)
-val DarkSurface = Color(0xFF15201A)
-val DarkSurfaceVariant = Color(0xFF1E2E26)
+/**
+ * SubAI Frontier design tokens.
+ *
+ * Visual language extracted from the x.ai reference design and re-applied here:
+ * warm off-white surfaces, near-black ink, hairline borders, pill controls,
+ * monochrome emphasis with a single orange accent.
+ *
+ * Canonical names use the Xai prefix. The legacy Forest and Sage names are kept as
+ * aliases because they are referenced by every screen; they now resolve to the Frontier
+ * palette so the whole app renders in the new design without touching call sites.
+ */
+
+// ---------------------------------------------------------------- canonical ink
+val XaiBackground = Color(0xFFFFFFFF)
+val XaiSurface = Color(0xFFF9F8F6)
+val XaiSurfaceVariant = Color(0xFFF1F0EC)
+val XaiInk = Color(0xFF0A0A0A)
+val XaiInkMuted = Color(0xFF6E6E68)
+val XaiBorder = Color(0xFFE7E5E0)
+val XaiBorderStrong = Color(0xFFD8D5CF)
+val XaiAccent = Color(0xFFFF5C1A)
+val XaiAccentSoft = Color(0xFFFFE9DE)
+val XaiDarkSheet = Color(0xFF141413)
+val XaiDarkSheetBorder = Color(0xFF2A2A28)
+val XaiOnDarkMuted = Color(0xFF9C9C96)
+
+// ------------------------------------------------------------- status semantics
+val XaiOk = Color(0xFF1F7A45)
+val XaiOkSoft = Color(0xFFE7F2EB)
+val XaiWarn = Color(0xFFB4560E)
+val XaiWarnSoft = Color(0xFFFDF3E8)
+val XaiDanger = Color(0xFFC02A1A)
+val XaiDangerSoft = Color(0xFFFDECEA)
+
+// ------------------------------------------------------------------ dark (theme)
+val XaiDarkBackground = Color(0xFF0A0A0A)
+val XaiDarkSurface = Color(0xFF141413)
+val XaiDarkSurfaceVariant = Color(0xFF1E1E1C)
+val XaiDarkOnBg = Color(0xFFF5F5F2)
+val XaiDarkOnSurfaceVariant = Color(0xFFA8A8A1)
+val XaiDarkBorder = Color(0xFF2E2E2B)
+
+// ------------------------------------------------------- legacy alias: surfaces
+val LightBackground = XaiBackground
+val LightSurface = XaiSurface
+val LightSurfaceVariant = XaiSurfaceVariant
+
+val DarkBackground = XaiDarkBackground
+val DarkSurface = XaiDarkSurface
+val DarkSurfaceVariant = XaiDarkSurfaceVariant
+
 val PureBlackBackground = Color(0xFF000000)
-val PureBlackSurface = Color(0xFF090F0C)
-val PureBlackSurfaceVariant = Color(0xFF142019)
+val PureBlackSurface = Color(0xFF0A0A0A)
+val PureBlackSurfaceVariant = Color(0xFF141413)
 
-val LightBackground = Color(0xFFF3F6F3)
-val LightSurface = Color(0xFFFFFFFF)
-val LightSurfaceVariant = Color(0xFFE8EEE9)
+// ----------------------------------------------- legacy alias: brand / headers
+/** Chrome colour for app bars, nav rail and dark hero sheets. */
+val ForestGreenDark = XaiInk
+val ForestGreenPrimary = XaiInk
+val DeepForestHeaderBg = XaiInk
+val DeepForestGradientTop = Color(0xFF141413)
+val DeepForestGradientBottom = Color(0xFF0A0A0A)
 
-// Signature Brand Tokens from Locked 10-Screen Reference Design
-val ForestGreenDark = Color(0xFF132F23)
-val ForestGreenPrimary = Color(0xFF1D563A)
-val DeepForestHeaderBg = Color(0xFF132F23)
-val DeepForestGradientTop = Color(0xFF10281E)
-val DeepForestGradientBottom = Color(0xFF18382A)
+val AlabasterSheetBg = XaiSurface
+val HomeTileAlabaster = XaiSurfaceVariant
+val HomeHighlightGreenTop = Color(0xFF1C1C1A)
+val HomeHighlightGreenBottom = Color(0xFF0A0A0A)
+val HomeHighlightMintBorder = XaiAccent
 
-val AlabasterSheetBg = Color(0xFFF3F6F3)
-val HomeTileAlabaster = Color(0xFFEAEFEA)
-val HomeHighlightGreenTop = Color(0xFF338759)
-val HomeHighlightGreenBottom = Color(0xFF226340)
-val HomeHighlightMintBorder = Color(0xFF7BE8A4)
-
-val PrimaryForestButton = Color(0xFF1D563A)
-val PrimaryMintCta = Color(0xFF5AD07E)
-val SageHighlightFill = Color(0xFFD7ECD9)
-val SageSoftCardFill = Color(0xFFE3EFE5)
-val SageCompletedGreen = Color(0xFF268955)
-val EmeraldCheckGreen = Color(0xFF268955)
-val AmberHighlightYellow = Color(0xFFFCE38A)
-val RetryAmberOrange = Color(0xFFE07A2A)
+/** Primary action fill: solid ink pills. */
+val PrimaryForestButton = XaiInk
+/** Secondary/inverted action fill: paper pill with hairline border. */
+val PrimaryMintCta = XaiSurfaceVariant
+val SageHighlightFill = XaiSurfaceVariant
+val SageSoftCardFill = XaiSurface
+val SageCompletedGreen = XaiOk
+val EmeraldCheckGreen = XaiOk
+val AmberHighlightYellow = XaiWarnSoft
+val RetryAmberOrange = XaiWarn

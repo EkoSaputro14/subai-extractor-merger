@@ -83,7 +83,7 @@ fun PasteTabScreen(
         // [ ✓  120 / 120   Baris terpetakan ]
         Surface(
             shape = RoundedCornerShape(16.dp),
-            color = if (isDark) Color(0xFF1F3F2D) else SageHighlightFill,
+            color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else SageHighlightFill,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -116,7 +116,7 @@ fun PasteTabScreen(
                             withStyle(
                                 SpanStyle(
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = if (isDark) Color(0xFFE7F5EC) else Color(0xFF122C1F)
+                                    color = if (isDark) MaterialTheme.colorScheme.surfaceVariant else Color(0xFF122C1F)
                                 )
                             ) {
                                 append("${uiState.matchedCount} / ${uiState.document.cues.size}")
@@ -196,7 +196,7 @@ fun PasteTabScreen(
                 ),
                 border = BorderStroke(
                     1.dp,
-                    if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFDCE4DF)
+                    MaterialTheme.colorScheme.outlineVariant
                 ),
                 modifier = Modifier
                     .weight(1f)
@@ -223,7 +223,7 @@ fun PasteTabScreen(
             color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
             border = BorderStroke(
                 1.dp,
-                if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3EAE5)
+                MaterialTheme.colorScheme.outlineVariant
             ),
             modifier = Modifier
                 .weight(1f)
@@ -250,7 +250,7 @@ fun PasteTabScreen(
                     ) {
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = if (isDark) Color(0xFF1F3328) else Color(0xFFEEF3EF),
+                            color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
                                 .clickable { viewModel.fillDemoAiTranslations() }
@@ -309,7 +309,7 @@ fun PasteTabScreen(
                     color = if (isDark) {
                         MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
                     } else {
-                        Color(0xFFEEF2EF)
+                        MaterialTheme.colorScheme.surfaceVariant
                     }
                 )
 
@@ -344,7 +344,7 @@ fun PasteTabScreen(
             color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
             border = BorderStroke(
                 1.dp,
-                if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3EAE5)
+                MaterialTheme.colorScheme.outlineVariant
             ),
             modifier = Modifier.fillMaxWidth()
         ) {

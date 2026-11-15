@@ -312,7 +312,7 @@ fun ExtractionRulesFullScreen(
                         color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
                         border = BorderStroke(
                             1.dp,
-                            if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3E9E4)
+                            MaterialTheme.colorScheme.outlineVariant
                         ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -399,7 +399,7 @@ fun ExtractionRulesFullScreen(
                     color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
                     border = BorderStroke(
                         1.dp,
-                        if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3E9E4)
+                        MaterialTheme.colorScheme.outlineVariant
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -492,7 +492,7 @@ fun ExtractionRulesFullScreen(
                     color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
                     border = BorderStroke(
                         1.dp,
-                        if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3E9E4)
+                        MaterialTheme.colorScheme.outlineVariant
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -549,7 +549,7 @@ fun ExtractionRulesFullScreen(
 
                         Surface(
                             shape = RoundedCornerShape(14.dp),
-                            color = if (isDark) Color(0xFF1A2921) else Color(0xFFECEFEC),
+                            color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
@@ -760,7 +760,7 @@ fun TranslationPromptFullScreen(
             title = "Prompt Terjemahan",
             subtitle = "Atur instruksi (prompt) yang dikirim ke AI saat menerjemahkan subtitle.",
             badgeText = "AI",
-            badgeBgColor = Color(0xFFD5E1FF),
+            badgeBgColor = MaterialTheme.colorScheme.surfaceVariant,
             badgeTextColor = Color(0xFF284594),
             leadingIcon = Icons.Default.AutoAwesome,
             modifier = Modifier
@@ -808,7 +808,7 @@ fun TranslationPromptFullScreen(
                     color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
                     border = BorderStroke(
                         1.dp,
-                        if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3E9E4)
+                        MaterialTheme.colorScheme.outlineVariant
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -851,7 +851,7 @@ fun TranslationPromptFullScreen(
                     color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
                     border = BorderStroke(
                         1.dp,
-                        if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3E9E4)
+                        MaterialTheme.colorScheme.outlineVariant
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -887,10 +887,10 @@ fun TranslationPromptFullScreen(
                             Box {
                                 Surface(
                                     shape = RoundedCornerShape(16.dp),
-                                    color = if (isDark) Color(0xFF1F3027) else Color(0xFFF3F6F3),
+                                    color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
                                     border = BorderStroke(
                                         1.dp,
-                                        if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFDADFD9)
+                                        MaterialTheme.colorScheme.outlineVariant
                                     ),
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(16.dp))
@@ -954,10 +954,10 @@ fun TranslationPromptFullScreen(
                                     lineHeight = 19.sp
                                 ),
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = if (isDark) Color(0xFF192820) else Color(0xFFF3F5F3),
-                                    unfocusedContainerColor = if (isDark) Color(0xFF192820) else Color(0xFFF3F5F3),
+                                    focusedContainerColor = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else Color(0xFFF3F5F3),
+                                    unfocusedContainerColor = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else Color(0xFFF3F5F3),
                                     focusedBorderColor = EmeraldCheckGreen.copy(alpha = 0.5f),
-                                    unfocusedBorderColor = if (isDark) Color(0xFF2B3F33) else Color(0xFFE2E7E2)
+                                    unfocusedBorderColor = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.outlineVariant
                                 ),
                                 minLines = 5,
                                 maxLines = 8,
@@ -985,7 +985,7 @@ fun TranslationPromptFullScreen(
                     color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
                     border = BorderStroke(
                         1.dp,
-                        if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3E9E4)
+                        MaterialTheme.colorScheme.outlineVariant
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1121,8 +1121,8 @@ private fun ExtractionHeroBanner(
 ) {
     Surface(
         shape = RoundedCornerShape(22.dp),
-        color = Color(0xFF193D2C),
-        border = BorderStroke(1.dp, Color(0xFF2B6046)),
+        color = MaterialTheme.colorScheme.inverseSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = modifier
     ) {
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -1256,7 +1256,7 @@ private fun ReferenceTwoTabHeader(
 ) {
     Surface(
         shape = RoundedCornerShape(18.dp),
-        color = if (isDark) Color(0xFF1A2820) else Color(0xFFE8ECE8),
+        color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier
             .fillMaxWidth()
             .height(46.dp)
@@ -1279,7 +1279,7 @@ private fun ReferenceTwoTabHeader(
                         .clip(RoundedCornerShape(15.dp))
                         .background(
                             if (isSelected) {
-                                if (isDark) Color(0xFF243A2E) else Color.White
+                                if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else Color.White
                             } else {
                                 Color.Transparent
                             }
@@ -1335,9 +1335,9 @@ private fun ExtractionPresetGridCard(
     modifier: Modifier = Modifier
 ) {
     val bg = if (selected) {
-        if (isDark) Color(0xFF1F422E) else Color(0xFFDBF2DF)
+        if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant
     } else {
-        if (isDark) MaterialTheme.colorScheme.surface else Color(0xFFF7F9F7)
+        MaterialTheme.colorScheme.surfaceVariant
     }
     val borderColor = if (selected) {
         Color(0xFF309B5A)
@@ -1469,7 +1469,7 @@ private fun PromptTemplateListRow(
     onClick: () -> Unit
 ) {
     val bg = if (selected) {
-        if (isDark) Color(0xFF1F422E) else Color(0xFFDDF1E0)
+        if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant
     } else {
         Color.Transparent
     }

@@ -262,7 +262,7 @@ fun SettingsScreenContent(
                         ),
                         border = BorderStroke(
                             1.dp,
-                            if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE2E8E3)
+                            MaterialTheme.colorScheme.outlineVariant
                         )
                     ) {
                         Column(
@@ -319,7 +319,7 @@ fun SettingsScreenContent(
                         ),
                         border = BorderStroke(
                             1.dp,
-                            if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE2E8E3)
+                            MaterialTheme.colorScheme.outlineVariant
                         )
                     ) {
                         Column(
@@ -365,12 +365,12 @@ private fun SettingsCategoryCardRow(
     onClick: () -> Unit
 ) {
     val bg = if (selected) {
-        if (isDark) Color(0xFF214431) else SageHighlightFill
+        if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else SageHighlightFill
     } else {
         if (isDark) MaterialTheme.colorScheme.surface else Color.White
     }
     val fg = if (selected) {
-        if (isDark) Color(0xFF8CE0AF) else Color(0xFF132F23)
+        if (isDark) Color(0xFF8CE0AF) else MaterialTheme.colorScheme.surfaceContainerHigh
     } else {
         MaterialTheme.colorScheme.onSurface
     }
@@ -385,7 +385,7 @@ private fun SettingsCategoryCardRow(
             } else if (isDark) {
                 MaterialTheme.colorScheme.outlineVariant
             } else {
-                Color(0xFFE4EAE5)
+                MaterialTheme.colorScheme.surfaceVariant
             }
         ),
         modifier = Modifier

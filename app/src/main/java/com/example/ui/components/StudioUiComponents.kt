@@ -61,9 +61,9 @@ fun StudioSectionCard(
         colors = CardDefaults.cardColors(containerColor = containerColor),
         border = BorderStroke(
             width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+            color = MaterialTheme.colorScheme.outlineVariant
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
             val isNarrowHeader = maxWidth < 360.dp && headerTrailing != null
@@ -87,8 +87,8 @@ fun StudioSectionCard(
                                 Box(
                                     modifier = Modifier
                                         .size(36.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(iconTint.copy(alpha = 0.14f)),
+                                        .clip(RoundedCornerShape(11.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
@@ -140,8 +140,8 @@ fun StudioSectionCard(
                                 Box(
                                     modifier = Modifier
                                         .size(36.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(iconTint.copy(alpha = 0.14f)),
+                                        .clip(RoundedCornerShape(11.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
@@ -236,22 +236,23 @@ fun StudioToggleRow(
 fun StatusPillBadge(
     text: String,
     modifier: Modifier = Modifier,
-    containerColor: Color = MaterialTheme.colorScheme.primaryContainer,
-    contentColor: Color = MaterialTheme.colorScheme.onPrimaryContainer
+    containerColor: Color = MaterialTheme.colorScheme.surfaceVariant,
+    contentColor: Color = MaterialTheme.colorScheme.onSurface
 ) {
     Surface(
         color = containerColor,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(50),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = modifier
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Medium,
             color = contentColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp)
         )
     }
 }
@@ -285,7 +286,7 @@ fun ResponsivePrimarySecondaryButtons(
                 Button(
                     onClick = onPrimaryClick,
                     enabled = primaryEnabled,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(50),
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -303,7 +304,7 @@ fun ResponsivePrimarySecondaryButtons(
                 OutlinedButton(
                     onClick = onSecondaryClick,
                     enabled = secondaryEnabled,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(50),
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -328,7 +329,7 @@ fun ResponsivePrimarySecondaryButtons(
                 Button(
                     onClick = onPrimaryClick,
                     enabled = primaryEnabled,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(50),
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
                     modifier = Modifier
                         .weight(1.2f)
@@ -347,7 +348,7 @@ fun ResponsivePrimarySecondaryButtons(
                 OutlinedButton(
                     onClick = onSecondaryClick,
                     enabled = secondaryEnabled,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(50),
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
                     modifier = Modifier
                         .weight(1f)
@@ -432,7 +433,7 @@ private fun ActionSpecButton(
     spec: ActionButtonSpec,
     modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(50)
     val padding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
     when (spec.kind) {
         ActionButtonKind.PRIMARY -> {

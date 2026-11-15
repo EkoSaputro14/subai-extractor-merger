@@ -390,7 +390,7 @@ private fun QuickFindReplaceControlsSection(
                 focusedContainerColor = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
                 unfocusedContainerColor = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
                 focusedBorderColor = PrimaryForestButton.copy(alpha = 0.6f),
-                unfocusedBorderColor = if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE1E8E3)
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
             ),
             modifier = Modifier
                 .fillMaxWidth()
@@ -426,7 +426,7 @@ private fun QuickFindReplaceControlsSection(
                 focusedContainerColor = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
                 unfocusedContainerColor = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
                 focusedBorderColor = PrimaryForestButton.copy(alpha = 0.6f),
-                unfocusedBorderColor = if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE1E8E3)
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
             ),
             modifier = Modifier
                 .fillMaxWidth()
@@ -444,7 +444,7 @@ private fun QuickFindReplaceControlsSection(
             Surface(
                 shape = RoundedCornerShape(18.dp),
                 color = if (uiState.findCaseSensitive) {
-                    if (isDark) Color(0xFF214431) else SageHighlightFill
+                    if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else SageHighlightFill
                 } else {
                     if (isDark) MaterialTheme.colorScheme.surface else Color.White
                 },
@@ -455,7 +455,7 @@ private fun QuickFindReplaceControlsSection(
                     } else if (isDark) {
                         MaterialTheme.colorScheme.outlineVariant
                     } else {
-                        Color(0xFFE1E8E3)
+                        MaterialTheme.colorScheme.surfaceVariant
                     }
                 ),
                 modifier = Modifier
@@ -473,7 +473,7 @@ private fun QuickFindReplaceControlsSection(
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold,
                         color = if (uiState.findCaseSensitive) {
-                            if (isDark) Color(0xFF8CE0AF) else Color(0xFF173F2A)
+                            if (isDark) Color(0xFF7BE8A4) else MaterialTheme.colorScheme.onSurface
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         }
@@ -579,7 +579,7 @@ private fun CompactTogglePill(
     Surface(
         shape = RoundedCornerShape(18.dp),
         color = if (checked) {
-            if (isDark) Color(0xFF214431) else SageHighlightFill
+            if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else SageHighlightFill
         } else {
             if (isDark) MaterialTheme.colorScheme.surface else Color.White
         },
@@ -590,7 +590,7 @@ private fun CompactTogglePill(
             } else if (isDark) {
                 MaterialTheme.colorScheme.outlineVariant
             } else {
-                Color(0xFFE1E8E3)
+                MaterialTheme.colorScheme.surfaceVariant
             }
         ),
         modifier = modifier
@@ -654,7 +654,7 @@ private fun FindResultsListCard(
         ),
         border = BorderStroke(
             1.dp,
-            if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE2E8E3)
+            MaterialTheme.colorScheme.outlineVariant
         )
     ) {
         Column(
@@ -824,7 +824,7 @@ private fun GlossaryRuleItemCard(
         color = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
         border = BorderStroke(
             width = 1.dp,
-            color = if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFE3EAE5)
+            color = MaterialTheme.colorScheme.outlineVariant
         ),
         modifier = Modifier.fillMaxWidth()
     ) {

@@ -259,7 +259,7 @@ fun MergeTabScreen(
                 ),
                 border = BorderStroke(
                     1.dp,
-                    if (isDark) MaterialTheme.colorScheme.outlineVariant else Color(0xFFDCE4DF)
+                    MaterialTheme.colorScheme.outlineVariant
                 ),
                 modifier = Modifier
                     .height(50.dp)
@@ -327,7 +327,7 @@ private fun MergeLanguageModePillSelector(
                 .padding(6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            val activeBg = if (isDark) Color(0xFF214431) else SageHighlightFill
+            val activeBg = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else SageHighlightFill
             val activeFg = if (isDark) Color(0xFF8CE0AF) else ForestGreenPrimary
 
             // Satu Bahasa
@@ -648,7 +648,7 @@ private fun AnimeSunsetVideoPreviewBox(
             // Translucent Dark Rounded Subtitle Overlay Box in Center-Bottom matching Panel 5!
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF1B2028).copy(alpha = 0.76f),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.76f),
                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
                 modifier = Modifier
                     .align(Alignment.Center)

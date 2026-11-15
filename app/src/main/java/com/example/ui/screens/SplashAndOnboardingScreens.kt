@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -310,13 +311,13 @@ fun SubAiOnboardingScreen(
                             text = "Mulai",
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0E291C)
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = null,
-                            tint = Color(0xFF0E291C),
+                            tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(19.dp)
                         )
                     }
@@ -460,7 +461,7 @@ private fun OnboardingStackedFormatIllustration(
                 text = "VTT",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF2B2623),
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp)
             )
         }
@@ -468,7 +469,7 @@ private fun OnboardingStackedFormatIllustration(
         // Bottom-Center Crisp White Card: "A -> 文"
         Surface(
             shape = RoundedCornerShape(16.dp),
-            color = Color(0xFFF5F8F6),
+            color = MaterialTheme.colorScheme.surfaceVariant,
             border = BorderStroke(1.dp, Color.White),
             shadowElevation = 10.dp,
             modifier = Modifier
@@ -478,7 +479,7 @@ private fun OnboardingStackedFormatIllustration(
                 text = "A \u2192 \u6587",
                 fontSize = 22.sp,
                 fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF17382A),
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
             )
         }
