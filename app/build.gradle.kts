@@ -85,11 +85,26 @@ android {
     unitTests {
       isIncludeAndroidResources = true
       all {
-        it.systemProperty("robolectric.offline", "true")
-        it.systemProperty(
-          "robolectric.dependency.dir",
+        // Robolectric android-all jars: use the AI Studio container cache when present,
+        // otherwise let Robolectric resolve them (avoids hard-coupling tests to one machine).
+        val containerDir = file(
           "/home/appuser/.m2/repository/org/robolectric/android-all-instrumented/16-robolectric-13921718-i7"
         )
+        val localDir = file(
+          System.getProperty("user.home") +
+            "/.m2/repository/org/robolectric/android-all-instrumented/16-robolectric-13921718-i7"
+        )
+        val resolvedDir = when {
+          containerDir.isDirectory -> containerDir
+          localDir.isDirectory -> localDir
+          else -> null
+        }
+        if (resolvedDir != null) {
+          it.systemProperty("robolectric.offline", "true")
+          it.systemProperty("robolectric.dependency.dir", resolvedDir.absolutePath)
+        } else {
+          it.systemProperty("robolectric.offline", "false")
+        }
       }
     }
   }

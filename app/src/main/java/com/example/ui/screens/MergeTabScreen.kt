@@ -77,7 +77,9 @@ import com.example.model.MergeCompareItem
 import com.example.model.ThemeSettings
 import com.example.ui.components.StatusPillBadge
 import com.example.ui.theme.ForestGreenPrimary
+import com.example.ui.components.FrontierStatusChip
 import com.example.ui.components.FrontierMetric
+import com.example.ui.components.FrontierStatusChip
 import com.example.ui.components.FrontierMetricStrip
 import com.example.ui.components.FrontierTone
 import com.example.ui.theme.FrontierMonoFamily
@@ -541,121 +543,114 @@ private fun AnimeSunsetVideoPreviewBox(
     bilingualOrder: BilingualOrder,
     onToggleExpandList: () -> Unit
 ) {
-    val cleanOriginal = previewItem?.cue?.cleanText?.replace("\\N", " ")
-        ?: "Aah... akhirnya sampai juga..."
-    val cleanTranslated = previewItem?.rawTranslatedLine?.ifBlank { null }?.replace("\\N", " ")
-        ?: "Ah... finally, we've arrived..."
+    val sourceLine = previewItem?.cue?.cleanText?.replace("\\N", " ")
+        ?: "Aah... we finally made it."
+    val translatedLine = previewItem?.rawTranslatedLine?.ifBlank { null }?.replace("\\N", " ")
+        ?: "Aah... akhirnya sampai juga."
 
-    val topLine = if (!bilingualMode) {
-        cleanTranslated
-    } else if (bilingualOrder == BilingualOrder.TRANSLATION_TOP) {
-        cleanTranslated
+    val topLine = if (!bilingualMode || bilingualOrder == BilingualOrder.TRANSLATION_TOP) {
+        translatedLine
     } else {
-        cleanOriginal
+        sourceLine
     }
-
     val bottomLine = if (!bilingualMode) {
         null
     } else if (bilingualOrder == BilingualOrder.TRANSLATION_TOP) {
-        cleanOriginal
+        sourceLine
     } else {
-        cleanTranslated
+        translatedLine
     }
 
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(190.dp)
-            .testTag("merge_video_preview_box"),
-        shape = RoundedCornerShape(22.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.inverseSurface,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            // Scenic Anime Twilight Sunset Sky with Clouds & Power Lines Silhouette
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val w = size.width
-                val h = size.height
-
-                // 1. Twilight Sunset Sky Gradient
-                drawRect(
-                    brush = Brush.verticalGradient(
-                        0.0f to Color(0xFF6B82C8),
-                        0.45f to Color(0xFFB792B8),
-                        0.80f to Color(0xFFEFA895),
-                        1.0f to Color(0xFFFAD0A2)
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Header: mono file cue id + mode badge
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = previewItem?.let { "#${it.cue.id}" } ?: "#001",
+                        fontFamily = FrontierMonoFamily,
+                        fontSize = 10.5.sp,
+                        color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.62f)
                     )
-                )
-
-                // 2. Soft Glowing Sunset Clouds
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFFFFDFC2).copy(alpha = 0.75f), Color.Transparent),
-                        center = Offset(w * 0.45f, h * 0.48f),
-                        radius = w * 0.36f
-                    ),
-                    center = Offset(w * 0.45f, h * 0.48f),
-                    radius = w * 0.36f
-                )
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFFF6B7B0).copy(alpha = 0.65f), Color.Transparent),
-                        center = Offset(w * 0.72f, h * 0.36f),
-                        radius = w * 0.28f
-                    ),
-                    center = Offset(w * 0.72f, h * 0.36f),
-                    radius = w * 0.28f
-                )
-
-                // 3. Distant Horizon & Foliage Silhouette on Bottom-Left
-                val hillsPath = Path().apply {
-                    moveTo(0f, h * 0.78f)
-                    quadraticTo(w * 0.25f, h * 0.68f, w * 0.55f, h * 0.86f)
-                    quadraticTo(w * 0.80f, h * 0.92f, w, h * 0.82f)
-                    lineTo(w, h)
-                    lineTo(0f, h)
-                    close()
+                    Text(
+                        text = when {
+                            !bilingualMode -> "Satu bahasa"
+                            bilingualOrder == BilingualOrder.TRANSLATION_TOP -> "Asli di bawah"
+                            else -> "Asli di atas"
+                        },
+                        fontFamily = FrontierMonoFamily,
+                        fontSize = 9.5.sp,
+                        color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.45f)
+                    )
                 }
-                drawPath(
-                    path = hillsPath,
-                    color = Color(0xFF1D2436).copy(alpha = 0.88f)
-                )
 
-                // 4. Anime Utility Pole & Power Lines on the Right
-                val poleX = w * 0.88f
-                drawLine(
-                    color = Color(0xFF1C202B),
-                    start = Offset(poleX, h * 0.42f),
-                    end = Offset(poleX, h),
-                    strokeWidth = 5f
-                )
-                drawLine(
-                    color = Color(0xFF1C202B),
-                    start = Offset(poleX - 18f, h * 0.48f),
-                    end = Offset(poleX + 18f, h * 0.48f),
-                    strokeWidth = 3f
-                )
-                // Power cables sweeping across the sunset sky
-                val wirePath = Path().apply {
-                    moveTo(poleX, h * 0.48f)
-                    quadraticTo(w * 0.94f, h * 0.56f, w, h * 0.52f)
-                    moveTo(poleX, h * 0.48f)
-                    quadraticTo(w * 0.60f, h * 0.32f, w * 0.25f, 0f)
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    if (previewItem?.cue != null) {
+                        Text(
+                            text = "${previewItem.cue.startTime} → ${previewItem.cue.endTime}",
+                            fontFamily = FrontierMonoFamily,
+                            fontSize = 9.5.sp,
+                            color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.45f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (bottomLine != null) {
+                        Text(
+                            text = if (bilingualOrder == BilingualOrder.TRANSLATION_TOP) bottomLine else topLine,
+                            fontSize = 12.5.sp,
+                            lineHeight = 18.sp,
+                            color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.58f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .background(MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.14f))
+                        )
+                        Text(
+                            text = if (bilingualOrder == BilingualOrder.TRANSLATION_TOP) topLine else bottomLine,
+                            fontSize = 13.5.sp,
+                            lineHeight = 19.sp,
+                            color = MaterialTheme.colorScheme.inverseOnSurface,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    } else {
+                        Text(
+                            text = topLine,
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                            color = MaterialTheme.colorScheme.inverseOnSurface,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
-                drawPath(
-                    path = wirePath,
-                    color = Color(0xFF1C202B).copy(alpha = 0.55f),
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.6f)
-                )
             }
 
-            // Expand Button in Top-Right Corner
             Surface(
                 shape = CircleShape,
-                color = Color.Black.copy(alpha = 0.28f),
+                color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.12f),
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(10.dp)
-                    .size(32.dp)
+                    .size(28.dp)
                     .clip(CircleShape)
                     .clickable(onClick = onToggleExpandList)
                     .testTag("preview_mode_cards_chip")
@@ -664,55 +659,9 @@ private fun AnimeSunsetVideoPreviewBox(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.OpenInNew,
                         contentDescription = "Lihat Semua Baris",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
+                        tint = MaterialTheme.colorScheme.inverseOnSurface,
+                        modifier = Modifier.size(14.dp)
                     )
-                }
-            }
-
-            // Translucent Dark Rounded Subtitle Overlay Box in Center-Bottom matching Panel 5!
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.76f),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(horizontal = 24.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 11.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    if (previewItem?.cue != null) {
-                        Text(
-                            text = "#${previewItem.cue.id}  ${previewItem.cue.startTime} → ${previewItem.cue.endTime}",
-                            fontFamily = FrontierMonoFamily,
-                            fontSize = 9.sp,
-                            color = Color.White.copy(alpha = 0.62f),
-                            textAlign = TextAlign.Center,
-                            maxLines = 1
-                        )
-                    }
-                    Text(
-                        text = topLine,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (bottomLine != null) {
-                        Text(
-                            text = bottomLine,
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.62f),
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
                 }
             }
         }
@@ -788,12 +737,12 @@ private fun MergeLineComparisonCard(
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(
             width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+            color = MaterialTheme.colorScheme.outlineVariant
         ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(
@@ -805,24 +754,21 @@ private fun MergeLineComparisonCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    StatusPillBadge(
+                    Text(
                         text = "#${item.cue.id}",
-                        containerColor = if (item.isTranslated) {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.errorContainer
-                        },
-                        contentColor = if (item.isTranslated) {
-                            MaterialTheme.colorScheme.onSecondaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onErrorContainer
-                        }
+                        fontFamily = FrontierMonoFamily,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = "${item.cue.startTime} → ${item.cue.endTime}",
-                        style = MaterialTheme.typography.labelMedium,
+                        fontFamily = FrontierMonoFamily,
+                        fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (!item.isTranslated) {
+                        FrontierStatusChip(text = "Belum", tone = FrontierTone.DANGER)
+                    }
                 }
 
                 if (item.cue.leadingAssTags.isNotEmpty()) {
