@@ -124,6 +124,8 @@ import com.example.ui.theme.DeepForestHeaderBg
 import com.example.ui.theme.EmeraldCheckGreen
 import com.example.ui.theme.ForestGreenPrimary
 import com.example.ui.theme.PrimaryForestButton
+import com.example.ui.components.FrontierStatusChip
+import com.example.ui.components.FrontierTone
 import com.example.ui.theme.FrontierMonoFamily
 import com.example.ui.theme.SageHighlightFill
 import com.example.ui.theme.SageSoftCardFill
@@ -1050,131 +1052,89 @@ private fun ExtractCueListItemCard(
     onClick: () -> Unit,
     inlineEditorContent: (@Composable () -> Unit)? = null
 ) {
-    val bgColor = when {
-        isSelected -> if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else SageHighlightFill
-        isTranslating -> MaterialTheme.colorScheme.secondaryContainer
-        else -> if (isDark) MaterialTheme.colorScheme.surface else Color.White
-    }
-
-    val indexBadgeBg = if (isSelected) {
-        if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else Color.White.copy(alpha = 0.85f)
+    val bgColor = if (isTranslating) {
+        MaterialTheme.colorScheme.surfaceVariant
     } else {
-        if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant
+        MaterialTheme.colorScheme.surface
     }
 
     Surface(
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(14.dp),
         color = bgColor,
         border = BorderStroke(
-            width = if (isSelected) 1.2.dp else 1.dp,
+            width = 1.dp,
             color = if (isSelected) {
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-            } else if (isDark) {
-                MaterialTheme.colorScheme.outlineVariant
+                MaterialTheme.colorScheme.onSurface
             } else {
-                MaterialTheme.colorScheme.surfaceVariant
+                MaterialTheme.colorScheme.outlineVariant
             }
         ),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
             .testTag("realtime_cue_card_${cue.id}")
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 12.dp)
+                .padding(horizontal = 12.dp, vertical = 11.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
+            // Header: mono #id + timecode (canvas cue-card header)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Left: 3-digit zero-padded index badge (001, 002, 003...)
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = indexBadgeBg
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
                     Text(
-                        text = String.format(Locale.US, "%03d", cue.id),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp)
+                        text = "#" + String.format(Locale.US, "%03d", cue.id),
+                        fontFamily = FrontierMonoFamily,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
-                }
-
-                // Middle: Timestamp + Dialogue Text
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
                     Text(
                         text = "${cue.startTime} → ${cue.endTime}",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    val displayLine = cue.cleanText.replace("\\N", " ").replace("\n", " ")
-                    Text(
-                        text = displayLine,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = if (isSelected) 2 else 1,
+                        fontFamily = FrontierMonoFamily,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-
-                    if (isSelected && !translatedPreview.isNullOrBlank()) {
-                        Text(
-                            text = translatedPreview.replace("\\N", " "),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
                 }
-
-                // Right: Solid Green Circle Checkmark Badge matching Screen 4 of Reference Image
-                if (isTranslated) {
-                    Box(
-                        modifier = Modifier
-                            .size(22.dp)
-                            .clip(CircleShape)
-                            .background(EmeraldCheckGreen),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Sudah Diterjemahkan",
-                            tint = Color.White,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(22.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Belum Diterjemahkan",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-                            modifier = Modifier.size(12.dp)
-                        )
-                    }
+                if (isSelected) {
+                    FrontierStatusChip(text = "Dipilih", tone = FrontierTone.INK)
                 }
             }
 
-            // Inline Expandable Editor right inside the selected cue card on compact screens!
+            // Source line (muted) then translation line (ink), as on the canvas
+            val displayLine = cue.cleanText.replace("\\N", " ").replace("\n", " ")
+            Text(
+                text = displayLine,
+                fontSize = 12.5.sp,
+                lineHeight = 17.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = if (isSelected) 2 else 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            val translationLine = translatedPreview?.replace("\\N", " ")?.replace("\n", " ")
+            if (!translationLine.isNullOrBlank()) {
+                Text(
+                    text = translationLine,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Inline expandable editor right inside the selected cue card on compact screens
             if (inlineEditorContent != null) {
                 inlineEditorContent()
             }
