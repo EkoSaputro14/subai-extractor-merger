@@ -62,6 +62,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
@@ -76,6 +77,9 @@ import com.example.model.MergeCompareItem
 import com.example.model.ThemeSettings
 import com.example.ui.components.StatusPillBadge
 import com.example.ui.theme.ForestGreenPrimary
+import com.example.ui.components.FrontierMetric
+import com.example.ui.components.FrontierMetricStrip
+import com.example.ui.components.FrontierTone
 import com.example.ui.theme.SageHighlightFill
 import com.example.ui.theme.subtitleEditorTextStyle
 import com.example.viewmodel.SubtitleUiState
@@ -145,6 +149,25 @@ fun MergeTabScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
             contentPadding = PaddingValues(bottom = 12.dp)
         ) {
+            // 0. Frontier metrics strip (baris / error / tag ASS)
+            item(key = "merge_metrics_strip") {
+                FrontierMetricStrip(
+                    metrics = listOf(
+                        FrontierMetric("${uiState.document.cues.size}", "Baris", FrontierTone.INK),
+                        FrontierMetric(
+                            "${compareItems.count { it.finalMergedLineText.isBlank() }}",
+                            "Error",
+                            FrontierTone.OK
+                        ),
+                        FrontierMetric(
+                            "${uiState.document.cues.count { it.style.isNotBlank() }}",
+                            "Tag ASS",
+                            FrontierTone.MUTED
+                        )
+                    )
+                )
+            }
+
             // 1. Segmented Pill Toggle: [ 📄 Satu Bahasa | 📑 Bilingual ] matching Panel 5
             item(key = "merge_mode_segmented_bar") {
                 MergeLanguageModePillSelector(
@@ -316,81 +339,82 @@ private fun MergeLanguageModePillSelector(
     onSelectBilingual: (Boolean) -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            val activeBg = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else SageHighlightFill
-            val activeFg = if (isDark) Color(0xFF8CE0AF) else ForestGreenPrimary
+            MergeModeChip(
+                label = "Satu Bahasa",
+                icon = Icons.Default.Description,
+                selected = !bilingualMode,
+                testTag = "merge_mode_single_language",
+                modifier = Modifier.weight(1f),
+                onClick = { onSelectBilingual(false) }
+            )
+            MergeModeChip(
+                label = "Bilingual",
+                icon = Icons.Default.Layers,
+                selected = bilingualMode,
+                testTag = "bilingual_mode_switch",
+                modifier = Modifier.weight(1f),
+                onClick = { onSelectBilingual(true) }
+            )
+        }
+    }
+}
 
-            // Satu Bahasa
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = if (!bilingualMode) activeBg else Color.Transparent,
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(14.dp))
-                    .clickable { onSelectBilingual(false) }
-                    .testTag("merge_mode_single_language")
-            ) {
-                Row(
-                    modifier = Modifier.padding(vertical = 10.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Description,
-                        contentDescription = null,
-                        modifier = Modifier.size(17.dp),
-                        tint = if (!bilingualMode) activeFg else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Satu Bahasa",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = if (!bilingualMode) FontWeight.Bold else FontWeight.Medium,
-                        color = if (!bilingualMode) activeFg else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+@Composable
+private fun MergeModeChip(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    testTag: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = if (selected) MaterialTheme.colorScheme.surface else Color.Transparent,
+        border = if (selected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null,
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(15.dp),
+                tint = if (selected) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
                 }
-            }
-
-            // Bilingual
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = if (bilingualMode) activeBg else Color.Transparent,
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(14.dp))
-                    .clickable { onSelectBilingual(true) }
-                    .testTag("bilingual_mode_switch")
-            ) {
-                Row(
-                    modifier = Modifier.padding(vertical = 10.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Layers,
-                        contentDescription = null,
-                        modifier = Modifier.size(17.dp),
-                        tint = if (bilingualMode) activeFg else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Bilingual",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = if (bilingualMode) FontWeight.Bold else FontWeight.Medium,
-                        color = if (bilingualMode) activeFg else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+            )
+            Spacer(modifier = Modifier.width(5.dp))
+            Text(
+                text = label,
+                fontSize = 12.sp,
+                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
                 }
-            }
+            )
         }
     }
 }

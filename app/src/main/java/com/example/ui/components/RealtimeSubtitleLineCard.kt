@@ -66,8 +66,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.model.SubtitleCue
 import com.example.model.ThemeSettings
+import com.example.ui.theme.FrontierMonoFamily
 import com.example.ui.theme.subtitleEditorTextStyle
 import kotlinx.coroutines.delay
 
@@ -166,15 +168,15 @@ fun RealtimeSubtitleLineCard(
                 isEditingInline = true
             }
             .testTag("realtime_subtitle_card_${cue.id}"),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
         border = BorderStroke(
-            width = if (isTranslatingThisCue || isRecentlyTranslated || isEditingInline) 1.5.dp else 1.dp,
+            width = 1.dp,
             color = borderColor
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
             modifier = Modifier
@@ -195,14 +197,15 @@ fun RealtimeSubtitleLineCard(
                 ) {
                     Text(
                         text = "#${cue.id}",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
+                        fontFamily = FrontierMonoFamily,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
 
                     Text(
-                        text = "• ${cue.startTime} → ${cue.endTime}",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = "${cue.startTime} → ${cue.endTime}",
+                        fontFamily = FrontierMonoFamily,
+                        fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -221,14 +224,15 @@ fun RealtimeSubtitleLineCard(
 
                     if (cue.leadingAssTags.isNotEmpty()) {
                         Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            shape = RoundedCornerShape(4.dp)
+                            color = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(50),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                         ) {
                             Text(
-                                text = "ASS Tag",
-                                style = MaterialTheme.typography.labelSmall,
+                                text = "ASS tag",
+                                fontSize = 9.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
                             )
                         }
                     }
@@ -266,7 +270,7 @@ fun RealtimeSubtitleLineCard(
             Text(
                 text = formattedOriginalText,
                 style = subtitleEditorTextStyle(themeSettings),
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("card_original_text_${cue.id}")

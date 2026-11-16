@@ -92,6 +92,13 @@ import com.example.model.BatchQueueState
 import com.example.model.FileConflictPolicy
 import com.example.model.TargetLanguageOption
 import com.example.ui.theme.EmeraldCheckGreen
+import com.example.ui.components.FrontierOrderBadge
+import com.example.ui.components.FrontierProgressBar
+import com.example.ui.components.FrontierStatusChip
+import com.example.ui.components.FrontierTone
+import com.example.ui.theme.FrontierMonoFamily
+import com.example.ui.theme.XaiOk
+import com.example.ui.theme.XaiWarn
 import com.example.ui.theme.ForestGreenPrimary
 import com.example.ui.theme.PrimaryForestButton
 import com.example.ui.theme.RetryAmberOrange
@@ -152,75 +159,57 @@ fun BatchQueueTabScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(18.dp)
                     ) {
-                        // Left: 76.dp Circular Progress Ring with "3/4" centered
-                        Box(
-                            modifier = Modifier.size(76.dp),
-                            contentAlignment = Alignment.Center
+                        // Left: compact progress readout (canvas: metrics strip carries the numbers)
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                            modifier = Modifier.width(56.dp)
                         ) {
-                            val progressFraction = if (batchState.totalFiles > 0) {
-                                (batchState.completedCount.toFloat() / batchState.totalFiles.toFloat()).coerceIn(0f, 1f)
-                            } else {
-                                0f
-                            }
-                            val ringColor = EmeraldCheckGreen
-                            val trackColor = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant
-
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                val strokeWidth = 8.dp.toPx()
-                                drawArc(
-                                    color = trackColor,
-                                    startAngle = 0f,
-                                    sweepAngle = 360f,
-                                    useCenter = false,
-                                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-                                )
-                                drawArc(
-                                    color = ringColor,
-                                    startAngle = -90f,
-                                    sweepAngle = 360f * progressFraction,
-                                    useCenter = false,
-                                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-                                )
-                            }
-
                             Text(
                                 text = "${batchState.completedCount}/${batchState.totalFiles}",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.ExtraBold,
+                                fontFamily = FrontierMonoFamily,
+                                fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.testTag("batch_overall_progress_text")
+                            )
+                            Text(
+                                text = "file",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
                         // Right: Metric Counters matching Screen 9 (Total, Selesai, Proses, + Ulang)
                         Row(
                             modifier = Modifier.weight(1f),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             BatchStatColumn(
                                 value = "${batchState.totalFiles}",
                                 label = "Total",
-                                valueColor = EmeraldCheckGreen,
+                                valueColor = MaterialTheme.colorScheme.onSurface,
                                 testTagId = "metric_total"
                             )
                             BatchStatColumn(
                                 value = "${batchState.completedCount}",
                                 label = "Selesai",
-                                valueColor = EmeraldCheckGreen,
+                                valueColor = XaiOk,
+                                showDivider = true,
                                 testTagId = "metric_completed"
                             )
                             BatchStatColumn(
                                 value = "${batchState.processingCount + batchState.queuedCount}",
                                 label = "Proses",
-                                valueColor = RetryAmberOrange,
+                                valueColor = XaiWarn,
+                                showDivider = true,
                                 testTagId = "metric_processing"
                             )
                             if (batchState.retryQueuedCount + batchState.needsAttentionCount > 0) {
                                 BatchStatColumn(
                                     value = "${batchState.retryQueuedCount + batchState.needsAttentionCount}",
                                     label = "Ulang",
-                                    valueColor = RetryAmberOrange,
+                                    valueColor = XaiWarn,
+                                    showDivider = true,
                                     testTagId = "metric_retry_queued"
                                 )
                             } else {
@@ -623,24 +612,34 @@ private fun BatchStatColumn(
     value: String,
     label: String,
     valueColor: Color,
-    testTagId: String
+    testTagId: String,
+    showDivider: Boolean = false
 ) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.testTag(testTagId)
     ) {
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.ExtraBold,
-            color = valueColor
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        if (showDivider) {
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(34.dp)
+                    .background(MaterialTheme.colorScheme.outlineVariant)
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.headlineSmall,
+                color = valueColor
+            )
+            Text(
+                text = label,
+                fontSize = 10.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
@@ -817,17 +816,15 @@ private fun BatchQueueJobItemCard(
             .testTag("batch_job_card_${index + 1}"),
         shape = RoundedCornerShape(16.dp),
         border = BorderStroke(
-            width = if (isActiveProcessing) 1.5.dp else 1.dp,
+            width = 1.dp,
             color = if (isActiveProcessing) {
-                EmeraldCheckGreen.copy(alpha = 0.65f)
-            } else if (isDark) {
-                MaterialTheme.colorScheme.outlineVariant
+                MaterialTheme.colorScheme.onSurface
             } else {
-                MaterialTheme.colorScheme.surfaceVariant
+                MaterialTheme.colorScheme.outlineVariant
             }
         ),
         colors = CardDefaults.cardColors(
-            containerColor = if (isDark) MaterialTheme.colorScheme.surface else Color.White
+            containerColor = MaterialTheme.colorScheme.surface
         )
     ) {
         Column(
@@ -845,12 +842,7 @@ private fun BatchQueueJobItemCard(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text(
-                        text = "#${job.queueOrder}",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    FrontierOrderBadge(order = job.queueOrder.toString().padStart(2, '0'))
 
                     Column(
                         modifier = Modifier.weight(1f),
@@ -858,8 +850,9 @@ private fun BatchQueueJobItemCard(
                     ) {
                         Text(
                             text = job.displayTitleWithRetryTag,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
+                            fontFamily = FrontierMonoFamily,
+                            fontSize = 12.sp,
+                            letterSpacing = (-0.2).sp,
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -868,8 +861,9 @@ private fun BatchQueueJobItemCard(
 
                         if (isActiveProcessing) {
                             Text(
-                                text = "Memproses.. ${job.translatedCuesProgress}/${job.totalCues}",
-                                style = MaterialTheme.typography.labelSmall,
+                                text = "${job.translatedCuesProgress} / ${job.totalCues} dialog",
+                                fontFamily = FrontierMonoFamily,
+                                fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             val cueFrac = if (job.totalCues > 0) {
@@ -877,14 +871,9 @@ private fun BatchQueueJobItemCard(
                             } else {
                                 0.56f
                             }
-                            LinearProgressIndicator(
-                                progress = { cueFrac },
-                                color = EmeraldCheckGreen,
-                                trackColor = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier
-                                    .fillMaxWidth(0.88f)
-                                    .height(5.dp)
-                                    .clip(RoundedCornerShape(3.dp))
+                            FrontierProgressBar(
+                                fraction = cueFrac,
+                                modifier = Modifier.fillMaxWidth(0.88f)
                             )
                         }
                     }
@@ -898,20 +887,7 @@ private fun BatchQueueJobItemCard(
                 ) {
                     when (job.status) {
                         BatchJobStatus.COMPLETED -> {
-                            Box(
-                                modifier = Modifier
-                                    .size(22.dp)
-                                    .clip(CircleShape)
-                                    .background(EmeraldCheckGreen),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "Selesai",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                            }
+                            FrontierStatusChip(text = "Selesai", tone = FrontierTone.OK)
                         }
 
                         BatchJobStatus.PROCESSING, BatchJobStatus.VALIDATING -> {
@@ -920,58 +896,29 @@ private fun BatchQueueJobItemCard(
                             } else {
                                 56
                             }
-                            Text(
-                                text = "$pct%",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            FrontierStatusChip(text = "Memproses $pct%", tone = FrontierTone.INK)
                         }
 
                         BatchJobStatus.RETRY_QUEUED -> {
-                            Text(
-                                text = "Retry (${job.attemptCount}/${job.maxRetries})",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = RetryAmberOrange
-                            )
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Retry Queued",
-                                tint = RetryAmberOrange,
-                                modifier = Modifier.size(18.dp)
+                            FrontierStatusChip(
+                                text = "Retry #${job.attemptCount}",
+                                tone = FrontierTone.WARN
                             )
                         }
 
                         BatchJobStatus.NEEDS_ATTENTION, BatchJobStatus.FAILED -> {
-                            Text(
-                                text = "Perlu Perhatian",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                            Icon(
-                                imageVector = Icons.Default.ErrorOutline,
-                                contentDescription = "Error",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(18.dp)
+                            FrontierStatusChip(
+                                text = "Perlu perhatian",
+                                tone = FrontierTone.DANGER
                             )
                         }
 
                         BatchJobStatus.CANCELLED -> {
-                            Text(
-                                text = "Dibatalkan",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.outline
-                            )
+                            FrontierStatusChip(text = "Dibatalkan", tone = FrontierTone.MUTED)
                         }
 
                         BatchJobStatus.QUEUED -> {
-                            Text(
-                                text = "Menunggu",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            FrontierStatusChip(text = "Menunggu", tone = FrontierTone.MUTED)
                         }
                     }
                 }
