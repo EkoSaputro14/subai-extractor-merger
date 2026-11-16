@@ -80,6 +80,7 @@ import com.example.ui.theme.ForestGreenPrimary
 import com.example.ui.components.FrontierMetric
 import com.example.ui.components.FrontierMetricStrip
 import com.example.ui.components.FrontierTone
+import com.example.ui.theme.FrontierMonoFamily
 import com.example.ui.theme.SageHighlightFill
 import com.example.ui.theme.subtitleEditorTextStyle
 import com.example.viewmodel.SubtitleUiState
@@ -275,7 +276,7 @@ fun MergeTabScreen(
         ) {
             OutlinedButton(
                 onClick = { viewModel.setShowRawMergedPreview(!uiState.showRawMergedPreview) },
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(50),
                 colors = ButtonDefaults.outlinedButtonColors(
                     containerColor = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
                     contentColor = MaterialTheme.colorScheme.onSurface
@@ -306,7 +307,7 @@ fun MergeTabScreen(
 
             Button(
                 onClick = { onSaveMergedFile(suggestedFileName) },
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(50),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = primaryColor,
                     contentColor = onPrimaryColor
@@ -679,10 +680,20 @@ private fun AnimeSunsetVideoPreviewBox(
                     .padding(horizontal = 24.dp)
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 11.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
+                    if (previewItem?.cue != null) {
+                        Text(
+                            text = "#${previewItem.cue.id}  ${previewItem.cue.startTime} → ${previewItem.cue.endTime}",
+                            fontFamily = FrontierMonoFamily,
+                            fontSize = 9.sp,
+                            color = Color.White.copy(alpha = 0.62f),
+                            textAlign = TextAlign.Center,
+                            maxLines = 1
+                        )
+                    }
                     Text(
                         text = topLine,
                         style = MaterialTheme.typography.titleMedium,
@@ -695,8 +706,8 @@ private fun AnimeSunsetVideoPreviewBox(
                     if (bottomLine != null) {
                         Text(
                             text = bottomLine,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.82f),
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.62f),
                             textAlign = TextAlign.Center,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis

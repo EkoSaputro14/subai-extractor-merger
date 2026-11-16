@@ -124,6 +124,7 @@ import com.example.ui.theme.DeepForestHeaderBg
 import com.example.ui.theme.EmeraldCheckGreen
 import com.example.ui.theme.ForestGreenPrimary
 import com.example.ui.theme.PrimaryForestButton
+import com.example.ui.theme.FrontierMonoFamily
 import com.example.ui.theme.SageHighlightFill
 import com.example.ui.theme.SageSoftCardFill
 import com.example.ui.theme.subtitleEditorTextStyle
@@ -741,18 +742,22 @@ private fun ExtractWorkspaceTopBar(
                         }
                     }
 
-                    Column(modifier = Modifier.weight(1f)) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
                         Text(
                             text = uiState.document.fileName,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
+                            fontFamily = FrontierMonoFamily,
+                            fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "${uiState.document.cues.size} dialog",
-                            style = MaterialTheme.typography.bodySmall,
+                            text = "${uiState.document.format.extension.uppercase()} · ${uiState.document.cues.size} dialog",
+                            fontFamily = FrontierMonoFamily,
+                            fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }

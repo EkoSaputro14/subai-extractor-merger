@@ -691,7 +691,7 @@ private fun BatchBottomActionRow(
             OutlinedButton(
                 onClick = onSelectMultipleFiles,
                 enabled = !batchState.isRunning,
-                shape = RoundedCornerShape(25.dp),
+                shape = RoundedCornerShape(50),
                 colors = ButtonDefaults.outlinedButtonColors(
                     containerColor = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
                     contentColor = MaterialTheme.colorScheme.onSurface
@@ -725,7 +725,7 @@ private fun BatchBottomActionRow(
             if (batchState.isRunning) {
                 Button(
                     onClick = { viewModel.pauseBatchTranslationQueue() },
-                    shape = RoundedCornerShape(25.dp),
+                    shape = RoundedCornerShape(50),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = primaryContainerColor,
                         contentColor = primaryContentColor
@@ -742,7 +742,7 @@ private fun BatchBottomActionRow(
             } else if (batchState.isPaused) {
                 Button(
                     onClick = { viewModel.resumeBatchTranslationQueue() },
-                    shape = RoundedCornerShape(25.dp),
+                    shape = RoundedCornerShape(50),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = primaryContainerColor,
                         contentColor = primaryContentColor
@@ -760,7 +760,7 @@ private fun BatchBottomActionRow(
                 Button(
                     onClick = { viewModel.startBatchTranslationQueue() },
                     enabled = batchState.queuedCount + batchState.retryQueuedCount > 0,
-                    shape = RoundedCornerShape(25.dp),
+                    shape = RoundedCornerShape(50),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = primaryContainerColor,
                         contentColor = primaryContentColor
