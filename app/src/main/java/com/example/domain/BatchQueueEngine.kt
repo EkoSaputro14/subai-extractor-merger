@@ -694,8 +694,17 @@ object BatchQueueEngine {
         }
 
         if (translationResult.isFailure) {
-            val errorMsg = translationResult.exceptionOrNull()?.message
+            val err = translationResult.exceptionOrNull()
+            val errorMsg = err?.message
                 ?: "Gagal menghubungi layanan AI saat menerjemahkan subtitle."
+            val recoveredPartial = when (err) {
+                is SingleTranslationFormatException -> err.partialValidCues
+                is SingleTranslationPartialException -> err.partialValidCues
+                else -> targetJob.validTranslatedCues
+            }
+            val mergedPartial = LinkedHashMap<Int, String>(targetJob.validTranslatedCues).apply {
+                putAll(recoveredPartial)
+            }
             return handleFailedAttemptAndRequeueAtEnd(
                 state = state,
                 job = processingJob,
@@ -703,7 +712,7 @@ object BatchQueueEngine {
                 failureType = BatchFailureType.INFRASTRUCTURE_ERROR,
                 reason = errorMsg,
                 validationResult = null,
-                newlyValidCues = emptyMap(),
+                newlyValidCues = mergedPartial,
                 nowMs = clockMs(),
                 onStateChanged = onStateChanged
             )
@@ -711,6 +720,9 @@ object BatchQueueEngine {
 
         val attemptOutput = translationResult.getOrThrow()
         val combinedTranslatedMap = LinkedHashMap<Int, String>().apply {
+            if (attemptOutput.customMergedContent == null && targetJob.validTranslatedCues.isNotEmpty()) {
+                putAll(targetJob.validTranslatedCues)
+            }
             putAll(attemptOutput.translatedCues)
         }
 
@@ -751,6 +763,14 @@ object BatchQueueEngine {
         )
 
         if (!validation.isValid) {
+            val validatedSubset = if (validation.structureErrors.isEmpty() &&
+                validation.invalidTimestampCueIds.isEmpty() &&
+                validation.outOfOrderCueIds.isEmpty()
+            ) {
+                finalTranslationsForMerge.filterKeys { it !in validation.failedCueIds }
+            } else {
+                emptyMap()
+            }
             return handleFailedAttemptAndRequeueAtEnd(
                 state = state,
                 job = validatingJob,
@@ -758,7 +778,7 @@ object BatchQueueEngine {
                 failureType = BatchFailureType.VALIDATION_FAILED,
                 reason = validation.summaryMessage,
                 validationResult = validation,
-                newlyValidCues = emptyMap(),
+                newlyValidCues = validatedSubset,
                 nowMs = clockMs(),
                 onStateChanged = onStateChanged
             )

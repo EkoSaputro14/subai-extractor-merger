@@ -333,7 +333,7 @@ object GeminiWebCookieClient {
             val combinedPrompt = buildString {
                 appendLine(systemPrompt.trim())
                 appendLine()
-                appendLine("--- DAFTAR DIALOG SUBTITLE ---")
+                appendLine("--- DAFTAR TEKS DIALOG ---")
                 append(numberedUserLines.trim())
             }
 
@@ -364,12 +364,19 @@ object GeminiWebCookieClient {
             )
 
             val cleanedFirst = OpenAiCompatibleClient.cleanAiModelOutput(firstAttemptText)
-            // If a specific model header was sent and Gemini Web returned blank or a short non-indexed refusal,
+            // If a specific model header was sent and Gemini Web returned blank, a refusal, or a short non-indexed message,
             // automatically retry once without the custom model header (falling back to default Gemini Web model).
             val hasNumberedLine = cleanedFirst.lineSequence().any { line ->
                 line.trim().matches(Regex("""^(?:[*_`~>\-\s•]*)(?:\[\s*\d+\s*\]|\d+\s*[.|:\-)]|#\d+).*"""))
             }
-            if ((cleanedFirst.isBlank() || (!hasNumberedLine && cleanedFirst.lines().size < 2)) &&
+            val lowerFirst = cleanedFirst.lowercase()
+            val looksLikeRefusal = lowerFirst.contains("tidak diprogram untuk itu") ||
+                lowerFirst.contains("hanya menghasilkan teks") ||
+                lowerFirst.contains("hanya ai berbasis teks") ||
+                lowerFirst.contains("tidak bisa membantu anda untuk itu") ||
+                lowerFirst.contains("not programmed") ||
+                lowerFirst.contains("text-based ai")
+            if ((cleanedFirst.isBlank() || looksLikeRefusal || (!hasNumberedLine && cleanedFirst.lines().size < 3)) &&
                 resolveModelHeader(modelId) != null
             ) {
                 val fallbackAttemptText = runCatching {

@@ -76,7 +76,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.model.AiProviderSettings
 import com.example.model.BatchQueueState
 import com.example.model.GlossaryRule
-import com.example.model.QueueUiEvent
 import com.example.model.ThemeSettings
 import com.example.ui.screens.AiProviderDetailScreenContent
 import com.example.ui.screens.BatchQueueTabScreen
@@ -86,8 +85,6 @@ import com.example.ui.screens.HomeDashboardScreen
 import com.example.ui.screens.MergeTabScreen
 import com.example.ui.screens.PasteTabScreen
 import com.example.ui.screens.SettingsScreenContent
-import com.example.ui.screens.StudioObsidianBg
-import com.example.ui.screens.SubAiMviLinearBatchWorkspace
 import com.example.ui.screens.SubAiOnboardingScreen
 import com.example.ui.screens.SubAiParallelogramLogo
 import com.example.ui.screens.SubAiSplashScreen
@@ -145,7 +142,7 @@ fun SubAiExtractorMainScreen(
     var introStep by rememberSaveable {
         val prefs = context.getSharedPreferences(INTRO_PREFS_NAME, Context.MODE_PRIVATE)
         val alreadySeen = prefs.getBoolean(KEY_SEEN_ONBOARDING_V1_3, false)
-        mutableIntStateOf(if (enableFirstLaunchIntro && initialTab != -1 && !alreadySeen) 1 else 0)
+        mutableIntStateOf(if (enableFirstLaunchIntro && !alreadySeen) 1 else 0)
     }
 
     var selectedTab by rememberSaveable { mutableIntStateOf(initialTab.coerceIn(-1, 5)) }
@@ -181,7 +178,7 @@ fun SubAiExtractorMainScreen(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         if (uris.isNotEmpty()) {
-            viewModel.onQueueEvent(QueueUiEvent.OnAddFiles(uris))
+            viewModel.addUrisToBatchQueue(uris)
         }
     }
 
@@ -199,36 +196,6 @@ fun SubAiExtractorMainScreen(
             snackbarHostState.showSnackbar(message)
             viewModel.clearBannerMessage()
         }
-    }
-
-    // Primary MVI Linear Batch Workspace (Default App Flow)
-    if (selectedTab == -1) {
-        Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            containerColor = StudioObsidianBg,
-            contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
-        ) { innerPadding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-            ) {
-                SubAiMviLinearBatchWorkspace(
-                    viewModel = viewModel,
-                    onSelectMultipleFiles = {
-                        openMultipleSubtitlesLauncher.launch(arrayOf("*/*"))
-                    },
-                    onChooseOutputFolder = {
-                        openBatchOutputFolderLauncher.launch(null)
-                    },
-                    onSaveMergedFile = { suggestedFileName ->
-                        createSubtitleLauncher.launch(suggestedFileName)
-                    }
-                )
-            }
-        }
-        return
     }
 
     if (introStep == 1) {

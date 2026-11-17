@@ -383,8 +383,8 @@ object SubtitleParserAndMerger {
         }
 
         return buildString {
-            appendLine("Anda adalah mesin penerjemah subtitle profesional (.ASS / .SRT / .VTT) yang dioptimalkan untuk model $selectedModel.")
-            appendLine("Tugas Anda: Terjemahkan setiap baris dialog subtitle yang diberikan ke dalam $targetLang.")
+            appendLine("Anda adalah penerjemah teks dialog profesional yang menerjemahkan daftar baris percakapan bernomor ($selectedModel).")
+            appendLine("Tugas Anda: Terjemahkan setiap baris teks dialog yang diberikan ke dalam $targetLang.")
             appendLine("GAYA TERJEMAHAN: $styleGuide")
             appendLine()
             appendLine("ATURAN FORMAT WAJIB (JANGAN DILANGGAR):")
