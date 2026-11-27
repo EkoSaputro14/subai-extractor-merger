@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -91,6 +92,7 @@ import com.example.model.BatchJobStatus
 import com.example.model.BatchQueueState
 import com.example.model.FileConflictPolicy
 import com.example.model.TargetLanguageOption
+import com.example.ui.components.AppDiagnosticLogDialog
 import com.example.ui.theme.EmeraldCheckGreen
 import com.example.ui.theme.ForestGreenPrimary
 import com.example.ui.theme.PrimaryForestButton
@@ -112,6 +114,7 @@ fun BatchQueueTabScreen(
 ) {
     val expandedErrorJobIds = remember { mutableStateMapOf<String, Boolean>() }
     var showOutputFolderInspectorDialog by remember { mutableStateOf(false) }
+    var showDiagnosticLogDialog by remember { mutableStateOf(false) }
     var showConfigDetails by rememberSaveable { mutableStateOf(false) }
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
@@ -592,6 +595,7 @@ fun BatchQueueTabScreen(
                         onToggleErrorDetails = {
                             expandedErrorJobIds[job.jobId] = !isErrorExpanded
                         },
+                        onOpenDiagnosticLog = { showDiagnosticLogDialog = true },
                         onMoveUp = { viewModel.moveBatchJobUp(job.jobId) },
                         onMoveDown = { viewModel.moveBatchJobDown(job.jobId) },
                         onRemove = { viewModel.removeBatchJob(job.jobId) }
@@ -606,7 +610,8 @@ fun BatchQueueTabScreen(
             batchState = batchState,
             isDark = isDark,
             viewModel = viewModel,
-            onSelectMultipleFiles = onSelectMultipleFiles
+            onSelectMultipleFiles = onSelectMultipleFiles,
+            onOpenDiagnosticLog = { showDiagnosticLogDialog = true }
         )
     }
 
@@ -614,6 +619,13 @@ fun BatchQueueTabScreen(
         OutputFolderContentsDialog(
             batchState = batchState,
             onDismiss = { showOutputFolderInspectorDialog = false }
+        )
+    }
+
+    if (showDiagnosticLogDialog) {
+        AppDiagnosticLogDialog(
+            onDismiss = { showDiagnosticLogDialog = false },
+            onLogsCopied = { msg -> viewModel.showBannerMessage(msg) }
         )
     }
 }
@@ -649,7 +661,8 @@ private fun BatchBottomActionRow(
     batchState: BatchQueueState,
     isDark: Boolean,
     viewModel: SubtitleViewModel,
-    onSelectMultipleFiles: () -> Unit
+    onSelectMultipleFiles: () -> Unit,
+    onOpenDiagnosticLog: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!batchState.isRunning && (batchState.needsAttentionCount > 0 || batchState.failedCount > 0 || batchState.completedCount > 0)) {
@@ -668,6 +681,15 @@ private fun BatchBottomActionRow(
                         Icon(Icons.Default.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Retry Gagal")
+                    }
+                    OutlinedButton(
+                        onClick = onOpenDiagnosticLog,
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.testTag("batch_open_diagnostic_log_button")
+                    ) {
+                        Icon(Icons.Default.BugReport, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Log HTTP")
                     }
                 }
                 if (batchState.completedCount > 0) {
@@ -805,6 +827,7 @@ private fun BatchQueueJobItemCard(
     isQueueRunning: Boolean,
     isErrorExpanded: Boolean,
     onToggleErrorDetails: () -> Unit,
+    onOpenDiagnosticLog: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onRemove: () -> Unit
@@ -1034,22 +1057,45 @@ private fun BatchQueueJobItemCard(
                         }
                     }
 
-                    if (job.attemptHistory.isNotEmpty() || job.lastValidationResult != null) {
-                        TextButton(
-                            onClick = onToggleErrorDetails,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            modifier = Modifier.testTag("batch_view_details_${job.fileName}")
-                        ) {
-                            Text(
-                                text = if (isErrorExpanded) "Tutup Detail" else "Detail Validasi",
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(
-                                imageVector = if (isErrorExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp)
-                            )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (job.lastFailureReason != null) {
+                            TextButton(
+                                onClick = onOpenDiagnosticLog,
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                modifier = Modifier.testTag("batch_view_log_${job.fileName}")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.BugReport,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "Log",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
+                        if (job.attemptHistory.isNotEmpty() || job.lastValidationResult != null) {
+                            TextButton(
+                                onClick = onToggleErrorDetails,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.testTag("batch_view_details_${job.fileName}")
+                            ) {
+                                Text(
+                                    text = if (isErrorExpanded) "Tutup Detail" else "Detail Validasi",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = if (isErrorExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
                         }
                     }
                 }

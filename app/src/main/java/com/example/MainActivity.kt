@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
@@ -77,6 +78,7 @@ import com.example.model.AiProviderSettings
 import com.example.model.BatchQueueState
 import com.example.model.GlossaryRule
 import com.example.model.ThemeSettings
+import com.example.ui.components.AppDiagnosticLogDialog
 import com.example.ui.screens.AiProviderDetailScreenContent
 import com.example.ui.screens.BatchQueueTabScreen
 import com.example.ui.screens.ExtractTabScreen
@@ -326,6 +328,7 @@ fun SubAiExtractorMainScreen(
                                         .align(Alignment.BottomCenter)
                                 )
                             }
+                            var showDiagnosticLogDialog by remember { mutableStateOf(false) }
                             SecondaryScreenForestHeader(
                                 title = activeScreenTitle,
                                 showOverflowMenu = !(selectedTab == 5 && settingsSubCategory == 2),
@@ -342,8 +345,15 @@ fun SubAiExtractorMainScreen(
                                 },
                                 onOpenFilePicker = { openSubtitleLauncher.launch(arrayOf("*/*")) },
                                 onLoadSampleAss = { viewModel.loadSampleAss() },
-                                onLoadSampleSrt = { viewModel.loadSampleSrt() }
+                                onLoadSampleSrt = { viewModel.loadSampleSrt() },
+                                onOpenDiagnosticLogs = { showDiagnosticLogDialog = true }
                             )
+                            if (showDiagnosticLogDialog) {
+                                AppDiagnosticLogDialog(
+                                    onDismiss = { showDiagnosticLogDialog = false },
+                                    onLogsCopied = { msg -> viewModel.showBannerMessage(msg) }
+                                )
+                            }
                         }
 
                         Surface(
@@ -409,7 +419,8 @@ private fun SecondaryScreenForestHeader(
     onSelectTab: (Int) -> Unit,
     onOpenFilePicker: () -> Unit,
     onLoadSampleAss: () -> Unit,
-    onLoadSampleSrt: () -> Unit
+    onLoadSampleSrt: () -> Unit,
+    onOpenDiagnosticLogs: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -536,6 +547,16 @@ private fun SecondaryScreenForestHeader(
                             menuExpanded = false
                             onSelectTab(5)
                         }
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("Log Diagnostik & HTTP") },
+                        leadingIcon = { Icon(Icons.Default.BugReport, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onOpenDiagnosticLogs()
+                        },
+                        modifier = Modifier.testTag("topbar_diagnostic_log_button")
                     )
                 }
             }

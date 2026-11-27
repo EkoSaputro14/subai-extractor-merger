@@ -1,5 +1,6 @@
 package com.example
 
+import com.example.data.AppDiagnosticLogger
 import com.example.data.GeminiWebCookieClient
 import org.json.JSONArray
 import org.junit.Assert.assertEquals
@@ -20,14 +21,15 @@ class GeminiWebCookieClientTest {
     @Before
     fun setUp() {
         GeminiWebCookieClient.clearRuntimeCachesForTesting()
+        AppDiagnosticLogger.clear()
     }
 
     @Test
-    fun buildStreamGenerateFreqPayload_standardFormatHasCleanSingleElementPromptArray() {
+    fun buildStreamGenerateFreqPayload_standardNullMetadataMatchesGeminiWebApiFormat() {
         val prompt = "[1] Hello world"
         val outerFreq = GeminiWebCookieClient.buildStreamGenerateFreqPayload(
             combinedPrompt = prompt,
-            extendedPromptTuple = false
+            variant = GeminiWebCookieClient.FreqPayloadVariant.STANDARD_NULL_METADATA
         )
 
         val outerArr = JSONArray(outerFreq)
@@ -37,44 +39,48 @@ class GeminiWebCookieClientTest {
         val innerArr = JSONArray(outerArr.getString(1))
         assertEquals(3, innerArr.length())
         val promptTuple = innerArr.getJSONArray(0)
-        // Must strictly be [prompt], NEVER [prompt, null, ["", "", ""]]
         assertEquals(1, promptTuple.length())
         assertEquals(prompt, promptTuple.getString(0))
-
         assertTrue(innerArr.isNull(1))
-        val convMeta = innerArr.getJSONArray(2)
+        assertTrue(innerArr.isNull(2))
+    }
+
+    @Test
+    fun buildStreamGenerateFreqPayload_standardEmptyMetadataAndExtendedVariants() {
+        val prompt = "[1] Hello world"
+        val emptyMetaFreq = GeminiWebCookieClient.buildStreamGenerateFreqPayload(
+            combinedPrompt = prompt,
+            variant = GeminiWebCookieClient.FreqPayloadVariant.STANDARD_EMPTY_METADATA
+        )
+        val innerEmptyMeta = JSONArray(JSONArray(emptyMetaFreq).getString(1))
+        val convMeta = innerEmptyMeta.getJSONArray(2)
         assertEquals(3, convMeta.length())
         assertEquals("", convMeta.getString(0))
         assertEquals("", convMeta.getString(1))
         assertEquals("", convMeta.getString(2))
-    }
 
-    @Test
-    fun buildStreamGenerateFreqPayload_extendedFormatBuildsFourElementPromptTuple() {
-        val prompt = "[1] Hello world"
-        val outerFreq = GeminiWebCookieClient.buildStreamGenerateFreqPayload(
+        val extendedFreq = GeminiWebCookieClient.buildStreamGenerateFreqPayload(
             combinedPrompt = prompt,
-            extendedPromptTuple = true
+            variant = GeminiWebCookieClient.FreqPayloadVariant.EXTENDED_NULL_METADATA
         )
-
-        val outerArr = JSONArray(outerFreq)
-        val innerArr = JSONArray(outerArr.getString(1))
-        val promptTuple = innerArr.getJSONArray(0)
+        val innerExtended = JSONArray(JSONArray(extendedFreq).getString(1))
+        val promptTuple = innerExtended.getJSONArray(0)
         assertEquals(4, promptTuple.length())
         assertEquals(prompt, promptTuple.getString(0))
         assertEquals(0, promptTuple.getInt(1))
         assertTrue(promptTuple.isNull(2))
         assertTrue(promptTuple.isNull(3))
+        assertTrue(innerExtended.isNull(2))
     }
 
     @Test
-    fun parseSessionTokensFromHtml_extractsSnlm0eCfb2hAndFdrFjeAndBuildsEndpoint() {
+    fun parseSessionTokensFromHtml_extractsNormalAndEscapedTokensAndBuildsBareOrQueryEndpoints() {
         val sampleHtml = """
             <script>
             WIZ_global_data = {
-              "SNlM0e": "AbCdEfGhIj123456:9876543210",
-              "cfb2h": "boq_assistant-bard-web-server_20260115.04_p0",
-              "FdrFJe": "-482910384756129384"
+              \"SNlM0e\": \"AbCdEfGhIj123456:9876543210\",
+              \"cfb2h\": \"boq_assistant-bard-web-server_20260115.04_p0\",
+              \"FdrFJe\": \"-482910384756129384\"
             };
             </script>
         """.trimIndent()
@@ -82,25 +88,40 @@ class GeminiWebCookieClientTest {
         val tokens = GeminiWebCookieClient.parseSessionTokensFromHtml(sampleHtml)
         assertEquals("AbCdEfGhIj123456:9876543210", tokens.snlm0eToken)
         assertEquals("boq_assistant-bard-web-server_20260115.04_p0", tokens.blBuildLabel)
+        assertTrue(tokens.blWasExtractedFromHtml)
         assertEquals("-482910384756129384", tokens.fSid)
 
-        val endpointWithFSid = GeminiWebCookieClient.buildStreamGenerateEndpoint(
+        val bareEndpoint = GeminiWebCookieClient.buildStreamGenerateEndpoint(
             blBuildLabel = tokens.blBuildLabel,
             fSid = tokens.fSid,
             reqId = 123456,
-            includeFSid = true
+            includeQueryParams = false
         )
-        assertTrue(endpointWithFSid.contains("bl=boq_assistant-bard-web-server_20260115.04_p0"))
-        assertTrue(endpointWithFSid.contains("&f.sid=-482910384756129384"))
-        assertTrue(endpointWithFSid.contains("&_reqid=123456&rt=c"))
+        assertFalse(bareEndpoint.contains("?"))
+        assertTrue(bareEndpoint.endsWith("/StreamGenerate"))
 
-        val endpointWithoutFSid = GeminiWebCookieClient.buildStreamGenerateEndpoint(
+        val queryEndpoint = GeminiWebCookieClient.buildStreamGenerateEndpoint(
             blBuildLabel = tokens.blBuildLabel,
             fSid = tokens.fSid,
             reqId = 123456,
-            includeFSid = false
+            includeQueryParams = true,
+            includeFSid = true,
+            blWasExtractedFromHtml = true
         )
-        assertFalse(endpointWithoutFSid.contains("f.sid="))
+        assertTrue(queryEndpoint.contains("bl=boq_assistant-bard-web-server_20260115.04_p0"))
+        assertTrue(queryEndpoint.contains("&f.sid=-482910384756129384"))
+        assertTrue(queryEndpoint.contains("&_reqid=123456&rt=c"))
+
+        // If bl was NOT extracted from live HTML, never send stale hardcoded bl= query param
+        val noStaleBlEndpoint = GeminiWebCookieClient.buildStreamGenerateEndpoint(
+            blBuildLabel = "boq_stale",
+            fSid = tokens.fSid,
+            reqId = 123456,
+            includeQueryParams = true,
+            includeFSid = true,
+            blWasExtractedFromHtml = false
+        )
+        assertFalse(noStaleBlEndpoint.contains("bl="))
     }
 
     @Test
@@ -154,8 +175,13 @@ class GeminiWebCookieClientTest {
         assertEquals("[1] Halo", firstResult)
         assertEquals(2, recordedSpecs.size)
         assertEquals(staleHeader, recordedSpecs[0].modelHeaderVal)
+        assertFalse(recordedSpecs[0].includeQueryParams)
         assertNull(recordedSpecs[1].modelHeaderVal)
-        assertFalse(recordedSpecs[1].useExtendedPromptTuple)
+        assertFalse(recordedSpecs[1].includeQueryParams)
+        assertEquals(
+            GeminiWebCookieClient.FreqPayloadVariant.STANDARD_NULL_METADATA,
+            recordedSpecs[1].payloadVariant
+        )
 
         // Second batch should skip the rejected stale header immediately (only 1 network call)
         val secondBatchSpecs = mutableListOf<GeminiWebCookieClient.StreamGenerateAttemptSpec>()
@@ -175,7 +201,7 @@ class GeminiWebCookieClientTest {
     }
 
     @Test
-    fun executeWithHttp400Fallback_fallsBackToExtendedPayloadAndNoFSidThenSessionRefresh() {
+    fun executeWithHttp400Fallback_traversesAll5FallbackStagesAndLogsDiagnostics() {
         val initialTokens = GeminiWebCookieClient.GeminiWebSessionTokens(
             snlm0eToken = "stale_snlm0e",
             blBuildLabel = "boq_old",
@@ -187,7 +213,7 @@ class GeminiWebCookieClientTest {
             fSid = "445566"
         )
 
-        // Scenario 1: Attempt 3 (extended prompt tuple & no f.sid) succeeds
+        // Scenario 1: Attempt 4 (extended tuple) succeeds after A2 and A3 fail with HTTP 400
         val specsForExtended = mutableListOf<GeminiWebCookieClient.StreamGenerateAttemptSpec>()
         val extendedResult = GeminiWebCookieClient.executeWithHttp400Fallback(
             initialTokens = initialTokens,
@@ -202,11 +228,12 @@ class GeminiWebCookieClientTest {
             "[1] Hai"
         }
         assertEquals("[1] Hai", extendedResult)
-        assertEquals(2, specsForExtended.size)
-        assertTrue(specsForExtended[1].useExtendedPromptTuple)
-        assertFalse(specsForExtended[1].includeFSid)
+        assertEquals(3, specsForExtended.size)
+        assertFalse(specsForExtended[0].includeQueryParams) // A2 bare
+        assertTrue(specsForExtended[1].includeQueryParams)  // A3 query params + empty meta
+        assertTrue(specsForExtended[2].useExtendedPromptTuple) // A4 extended tuple
 
-        // Scenario 2: Attempts 1..3 fail with HTTP 400, Attempt 4 refreshes SNlM0e and succeeds
+        // Scenario 2: All initial stages fail with HTTP 400 -> Attempt 5 refreshes SNlM0e and succeeds
         var refreshCount = 0
         val refreshResult = GeminiWebCookieClient.executeWithHttp400Fallback(
             initialTokens = initialTokens,
@@ -226,7 +253,7 @@ class GeminiWebCookieClientTest {
         assertEquals(1, refreshCount)
         assertEquals("[1] Terima kasih", refreshResult)
 
-        // Scenario 3: All attempts fail -> throws clear Indonesian HTTP 400 error with WebView Turbo hint
+        // Scenario 3: All attempts fail -> throws clear Indonesian HTTP 400 error mentioning Log HTTP
         val failure = runCatching {
             GeminiWebCookieClient.executeWithHttp400Fallback(
                 initialTokens = initialTokens,
@@ -239,6 +266,19 @@ class GeminiWebCookieClientTest {
         }.exceptionOrNull()
         assertNotNull(failure)
         assertTrue(failure!!.message!!.contains("HTTP 400"))
-        assertTrue(failure.message!!.contains("WebView Turbo"))
+        assertTrue(failure.message!!.contains("Log HTTP"))
+    }
+
+    @Test
+    fun diagnosticLogger_redactsCookiesAndTokensInExportedText() {
+        AppDiagnosticLogger.http(
+            "GeminiWeb",
+            "Cookie __Secure-1PSID=g.a000superSecretCookieToken12345; __Secure-1PSIDTS=sidts-secret99999999"
+        )
+        val exported = AppDiagnosticLogger.exportAsPlainText()
+        assertFalse(exported.contains("superSecretCookieToken12345"))
+        assertFalse(exported.contains("sidts-secret99999999"))
+        assertTrue(exported.contains("__Secure-1PSID=g.a0***"))
+        assertTrue(exported.contains("__Secure-1PSIDTS=sidt***"))
     }
 }
