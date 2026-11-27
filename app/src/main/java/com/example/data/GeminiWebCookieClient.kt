@@ -27,10 +27,13 @@ object GeminiWebCookieClient {
         "https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate"
 
     private const val USER_AGENT =
-        "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+    private const val DEFAULT_BL_BUILD_LABEL = "boq_assistant-bard-web-server_20250507.06_p0"
 
     private val SNLM0E_REGEX = Regex(""""SNlM0e"\s*:\s*"([^"]+)"""")
     private val CFB2H_REGEX = Regex(""""cfb2h"\s*:\s*"([^"]+)"""")
+    private val FDRFJE_REGEX = Regex(""""FdrFJe"\s*:\s*"([^"]+)"""")
 
     private val JSON_COOKIE_EDITOR_PSID_REGEX = Regex(
         """"name"\s*:\s*"(?:__Secure-1PSID|SECURE_1PSID)"[^}]*?"value"\s*:\s*"([^"]+)"""",
@@ -48,6 +51,10 @@ object GeminiWebCookieClient {
     private val PSIDTS_COOKIE_REGEX = Regex(
         """["']?(?:__Secure-1PSIDTS|SECURE_1PSIDTS|GEMINI_1PSIDTS|1PSIDTS)["']?\s*[=:]\s*["']?([^"';\s\r\n,}]+)""",
         RegexOption.IGNORE_CASE
+    )
+
+    private val NUMBERED_LINE_REGEX = Regex(
+        """^(?:[*_`~>\-\s•]*)(?:\[\s*\d+\s*\]|\d+\s*[.|:\-)]|#\d+).*"""
     )
 
     /**
@@ -112,6 +119,12 @@ object GeminiWebCookieClient {
     }
 
     private val discoveredModelHeaders = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val rejectedModelHeaders = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    internal fun clearRuntimeCachesForTesting() {
+        discoveredModelHeaders.clear()
+        rejectedModelHeaders.clear()
+    }
 
     fun sanitizeCookieToken(rawToken: String): String {
         return rawToken
@@ -137,11 +150,137 @@ object GeminiWebCookieClient {
         }
     }
 
-    private data class GeminiWebSessionTokens(
+    /**
+     * Merges user-supplied `__Secure-1PSID` / `__Secure-1PSIDTS` with any rotated cookies returned
+     * via `Set-Cookie` headers from `GET https://gemini.google.com/app` (e.g. refreshed
+     * `__Secure-1PSIDTS`, `__Secure-1PSIDCC`, `NID`, `AEC`) without duplicating keys.
+     */
+    internal fun mergeCookieHeaders(
+        psid: String,
+        psidts: String,
+        setCookieHeaders: List<String> = emptyList()
+    ): String {
+        val cookies = LinkedHashMap<String, String>()
+        val cleanPsid = sanitizeCookieToken(psid)
+        val cleanPsidts = sanitizeCookieToken(psidts)
+        if (cleanPsid.isNotEmpty()) {
+            cookies["__Secure-1PSID"] = cleanPsid
+        }
+        if (cleanPsidts.isNotEmpty()) {
+            cookies["__Secure-1PSIDTS"] = cleanPsidts
+        }
+
+        for (rawHeader in setCookieHeaders) {
+            val pair = rawHeader.substringBefore(';').trim()
+            val eqIndex = pair.indexOf('=')
+            if (eqIndex <= 0) continue
+            val name = pair.substring(0, eqIndex).trim()
+            val value = sanitizeCookieToken(pair.substring(eqIndex + 1))
+            if (name.isEmpty() || value.isEmpty() || value.equals("deleted", ignoreCase = true)) {
+                continue
+            }
+            // Never overwrite a non-empty __Secure-1PSID with a malformed short value
+            if (name.equals("__Secure-1PSID", ignoreCase = true) && cleanPsid.isNotEmpty() && value.length < 16) {
+                continue
+            }
+            cookies[name] = value
+        }
+
+        return cookies.entries.joinToString("; ") { (k, v) -> "$k=$v" }
+    }
+
+    internal data class GeminiWebSessionTokens(
         val snlm0eToken: String,
         val blBuildLabel: String,
+        val fSid: String = "",
+        val setCookieHeaders: List<String> = emptyList(),
         val rawHtml: String = ""
     )
+
+    internal class StreamGenerateHttpException(
+        val statusCode: Int,
+        val responseSnippet: String,
+        message: String
+    ) : IllegalStateException(message)
+
+    internal data class StreamGenerateAttemptSpec(
+        val outerFreqStr: String,
+        val modelHeaderVal: String?,
+        val includeFSid: Boolean,
+        val useExtendedPromptTuple: Boolean,
+        val refreshSessionBeforeAttempt: Boolean = false
+    )
+
+    internal fun parseSessionTokensFromHtml(
+        html: String,
+        setCookieHeaders: List<String> = emptyList()
+    ): GeminiWebSessionTokens {
+        val snlm0e = SNLM0E_REGEX.find(html)?.groupValues?.getOrNull(1).orEmpty()
+        if (snlm0e.isEmpty()) {
+            throw IllegalStateException(
+                "Token sesi SNlM0e tidak ditemukan. Pastikan cookie __Secure-1PSID & __Secure-1PSIDTS masih aktif (belum kedaluwarsa)."
+            )
+        }
+        val cfb2h = CFB2H_REGEX.find(html)?.groupValues?.getOrNull(1)
+            ?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_BL_BUILD_LABEL
+        val fSid = FDRFJE_REGEX.find(html)?.groupValues?.getOrNull(1).orEmpty()
+
+        return GeminiWebSessionTokens(
+            snlm0eToken = snlm0e,
+            blBuildLabel = cfb2h,
+            fSid = fSid,
+            setCookieHeaders = setCookieHeaders,
+            rawHtml = html
+        )
+    }
+
+    /**
+     * Builds the valid JSPB `f.req` payload for `BardFrontendService/StreamGenerate`:
+     * - Standard (`extendedPromptTuple = false`): `[null, "[[\"PROMPT\"],null,[\"\",\"\",\"\"]]"]`
+     * - Extended (`extendedPromptTuple = true`):  `[null, "[[\"PROMPT\",0,null,null],null,[\"\",\"\",\"\"]]"]`
+     */
+    internal fun buildStreamGenerateFreqPayload(
+        combinedPrompt: String,
+        extendedPromptTuple: Boolean = false
+    ): String {
+        val innerPromptArray = JSONArray().apply {
+            put(combinedPrompt)
+            if (extendedPromptTuple) {
+                put(0)
+                put(JSONObject.NULL)
+                put(JSONObject.NULL)
+            }
+        }
+        val innerJsonStr = JSONArray().apply {
+            put(innerPromptArray)
+            put(JSONObject.NULL)
+            put(JSONArray().put("").put("").put(""))
+        }.toString()
+
+        return JSONArray().apply {
+            put(JSONObject.NULL)
+            put(innerJsonStr)
+        }.toString()
+    }
+
+    internal fun buildStreamGenerateEndpoint(
+        blBuildLabel: String,
+        fSid: String,
+        reqId: Int,
+        includeFSid: Boolean = true
+    ): String {
+        val encodedBl = URLEncoder.encode(blBuildLabel, "UTF-8")
+        return buildString {
+            append(GEMINI_STREAM_GENERATE_URL)
+            append("?bl=").append(encodedBl)
+            if (includeFSid && fSid.isNotBlank()) {
+                append("&f.sid=").append(URLEncoder.encode(fSid, "UTF-8"))
+            }
+            append("&_reqid=").append(reqId)
+            append("&rt=c")
+        }
+    }
 
     private fun fetchSessionTokensBlocking(psid: String, psidts: String): GeminiWebSessionTokens {
         val cleanPsid = sanitizeCookieToken(psid)
@@ -170,20 +309,13 @@ object GeminiWebCookieClient {
                 throw IllegalStateException("HTTP $code saat menghubungi gemini.google.com/app")
             }
 
-            val snlm0e = SNLM0E_REGEX.find(html)?.groupValues?.getOrNull(1).orEmpty()
-            if (snlm0e.isEmpty()) {
-                throw IllegalStateException(
-                    "Token sesi SNlM0e tidak ditemukan. Pastikan cookie __Secure-1PSID & __Secure-1PSIDTS masih aktif (belum kedaluwarsa)."
-                )
-            }
-            val cfb2h = CFB2H_REGEX.find(html)?.groupValues?.getOrNull(1)
-                ?: "boq_assistant-bard-web-server_20250219.08_p0"
+            val setCookieHeaders = connection.headerFields
+                .entries
+                .filter { (key, _) -> key != null && key.equals("Set-Cookie", ignoreCase = true) }
+                .flatMap { (_, values) -> values.orEmpty() }
+                .filter { it.isNotBlank() }
 
-            return GeminiWebSessionTokens(
-                snlm0eToken = snlm0e,
-                blBuildLabel = cfb2h,
-                rawHtml = html
-            )
+            return parseSessionTokensFromHtml(html = html, setCookieHeaders = setCookieHeaders)
         } finally {
             connection.disconnect()
         }
@@ -261,7 +393,9 @@ object GeminiWebCookieClient {
             val rawLabel = match.groupValues[2].trim()
             val normalizedSlug = normalizeGeminiModelSlug(rawLabel)
             if (normalizedSlug != null) {
-                discoveredModelHeaders[normalizedSlug] = """[1,null,null,null,"$hexId"]"""
+                val headerVal = """[1,null,null,null,"$hexId"]"""
+                discoveredModelHeaders[normalizedSlug] = headerVal
+                rejectedModelHeaders.remove(headerVal)
                 if (normalizedSlug !in foundModels) {
                     foundModels.add(0, normalizedSlug)
                 }
@@ -299,7 +433,7 @@ object GeminiWebCookieClient {
      * Maps Gemini model names (from gemini-web2api, including Gemini 3.8 Flash, Gemini 4 Argon,
      * Gemini 3.5 Flash/Thinking, and 2.5/2.0 series) to the `x-goog-ext-525001261-jspb` header value.
      */
-    private fun resolveModelHeader(modelId: String): String? {
+    internal fun resolveModelHeader(modelId: String): String? {
         val lower = modelId.lowercase().trim().removePrefix("models/")
         discoveredModelHeaders[lower]?.let { return it }
         return when {
@@ -317,6 +451,163 @@ object GeminiWebCookieClient {
         }
     }
 
+    private fun looksLikeGeminiRefusal(cleanedText: String): Boolean {
+        val lower = cleanedText.lowercase()
+        return lower.contains("tidak diprogram untuk itu") ||
+            lower.contains("hanya menghasilkan teks") ||
+            lower.contains("hanya ai berbasis teks") ||
+            lower.contains("tidak bisa membantu anda untuk itu") ||
+            lower.contains("not programmed") ||
+            lower.contains("text-based ai")
+    }
+
+    private fun isPreferredTranslatedOutput(cleanedText: String): Boolean {
+        if (cleanedText.isBlank() || looksLikeGeminiRefusal(cleanedText)) return false
+        val hasNumberedLine = cleanedText.lineSequence().any { line ->
+            NUMBERED_LINE_REGEX.matches(line.trim())
+        }
+        return hasNumberedLine || cleanedText.lines().size >= 3
+    }
+
+    /**
+     * Executes `StreamGenerate` with an automatic multi-stage HTTP 400 / model-header fallback ladder:
+     * 1. Standard `f.req` (`[[prompt], null, ["","",""]]`) + live/mapped `x-goog-ext-525001261-jspb` + `f.sid`.
+     * 2. If Attempt 1 throws HTTP 400 (e.g. rotated/deprecated model hash) or returns blank/refusal,
+     *    caches the rejected header and retries with Standard `f.req` WITHOUT `x-goog-ext-525001261-jspb`.
+     * 3. If Attempt 2 fails with HTTP 400/error or blank, retries with Extended `f.req`
+     *    (`[[prompt, 0, null, null], null, ["","",""]]`) WITHOUT `x-goog-ext-525001261-jspb` and WITHOUT `f.sid`.
+     * 4. If still failing with HTTP 400/401/403, refreshes session tokens (`SNlM0e`/`cfb2h`/`FdrFJe`)
+     *    once and retries with default model & standard `f.req`.
+     */
+    internal fun executeWithHttp400Fallback(
+        initialTokens: GeminiWebSessionTokens,
+        combinedPrompt: String,
+        initialModelHeaderVal: String?,
+        refreshTokens: () -> GeminiWebSessionTokens,
+        executor: (tokens: GeminiWebSessionTokens, spec: StreamGenerateAttemptSpec) -> String
+    ): String {
+        val standardFreq = buildStreamGenerateFreqPayload(combinedPrompt, extendedPromptTuple = false)
+        val extendedFreq = buildStreamGenerateFreqPayload(combinedPrompt, extendedPromptTuple = true)
+
+        val effectiveModelHeader = initialModelHeaderVal?.takeIf { it !in rejectedModelHeaders }
+        var activeTokens = initialTokens
+        var lastError: Throwable? = null
+        var bestNonBlankText = ""
+
+        // Attempt 1: With model routing header (if available & not previously rejected with HTTP 400)
+        if (effectiveModelHeader != null) {
+            val spec1 = StreamGenerateAttemptSpec(
+                outerFreqStr = standardFreq,
+                modelHeaderVal = effectiveModelHeader,
+                includeFSid = activeTokens.fSid.isNotBlank(),
+                useExtendedPromptTuple = false
+            )
+            val res1 = runCatching { executor(activeTokens, spec1) }
+            if (res1.isSuccess) {
+                val cleaned1 = OpenAiCompatibleClient.cleanAiModelOutput(res1.getOrDefault(""))
+                if (cleaned1.isNotBlank()) bestNonBlankText = cleaned1
+                if (isPreferredTranslatedOutput(cleaned1)) {
+                    return cleaned1
+                }
+            } else {
+                val err = res1.exceptionOrNull()
+                lastError = err
+                if (err is StreamGenerateHttpException && err.statusCode == 400) {
+                    rejectedModelHeaders.add(effectiveModelHeader)
+                }
+            }
+        }
+
+        // Attempt 2: Default Gemini Web model (NO x-goog-ext-525001261-jspb header), standard f.req
+        val spec2 = StreamGenerateAttemptSpec(
+            outerFreqStr = standardFreq,
+            modelHeaderVal = null,
+            includeFSid = activeTokens.fSid.isNotBlank(),
+            useExtendedPromptTuple = false
+        )
+        val res2 = runCatching { executor(activeTokens, spec2) }
+        if (res2.isSuccess) {
+            val cleaned2 = OpenAiCompatibleClient.cleanAiModelOutput(res2.getOrDefault(""))
+            if (cleaned2.isNotBlank()) {
+                if (isPreferredTranslatedOutput(cleaned2) || !looksLikeGeminiRefusal(cleaned2)) {
+                    return cleaned2
+                }
+                if (bestNonBlankText.isBlank()) bestNonBlankText = cleaned2
+            }
+        } else {
+            lastError = res2.exceptionOrNull()
+        }
+
+        // Attempt 3: Extended prompt tuple [[prompt, 0, null, null], null, ["","",""]], NO model header, NO f.sid
+        if (bestNonBlankText.isBlank() || looksLikeGeminiRefusal(bestNonBlankText)) {
+            val spec3 = StreamGenerateAttemptSpec(
+                outerFreqStr = extendedFreq,
+                modelHeaderVal = null,
+                includeFSid = false,
+                useExtendedPromptTuple = true
+            )
+            val res3 = runCatching { executor(activeTokens, spec3) }
+            if (res3.isSuccess) {
+                val cleaned3 = OpenAiCompatibleClient.cleanAiModelOutput(res3.getOrDefault(""))
+                if (cleaned3.isNotBlank()) {
+                    if (!looksLikeGeminiRefusal(cleaned3)) {
+                        return cleaned3
+                    }
+                    if (bestNonBlankText.isBlank()) bestNonBlankText = cleaned3
+                }
+            } else {
+                lastError = res3.exceptionOrNull()
+            }
+        }
+
+        // Attempt 4: Fresh session token refresh (handles mid-batch SNlM0e / __Secure-1PSIDTS rotation)
+        val isHttpAuthOrBadRequest = (lastError as? StreamGenerateHttpException)?.statusCode in listOf(400, 401, 403)
+        if (bestNonBlankText.isBlank() && isHttpAuthOrBadRequest) {
+            val refreshed = runCatching { refreshTokens() }.getOrNull()
+            if (refreshed != null) {
+                activeTokens = refreshed
+                val spec4 = StreamGenerateAttemptSpec(
+                    outerFreqStr = standardFreq,
+                    modelHeaderVal = null,
+                    includeFSid = false,
+                    useExtendedPromptTuple = false,
+                    refreshSessionBeforeAttempt = true
+                )
+                val res4 = runCatching { executor(activeTokens, spec4) }
+                if (res4.isSuccess) {
+                    val cleaned4 = OpenAiCompatibleClient.cleanAiModelOutput(res4.getOrDefault(""))
+                    if (cleaned4.isNotBlank()) {
+                        return cleaned4
+                    }
+                } else {
+                    lastError = res4.exceptionOrNull()
+                }
+            }
+        }
+
+        if (bestNonBlankText.isNotBlank()) {
+            return bestNonBlankText
+        }
+
+        val finalErr = lastError
+        if (finalErr is StreamGenerateHttpException && finalErr.statusCode == 400) {
+            val detailSuffix = finalErr.responseSnippet
+                .takeIf { it.isNotBlank() }
+                ?.let { " Detail: $it" }
+                .orEmpty()
+            throw IllegalStateException(
+                "HTTP 400 saat memanggil StreamGenerate Gemini Web (setelah fallback header & payload otomatis). " +
+                    "Silakan ambil ulang cookie __Secure-1PSID & __Secure-1PSIDTS via WebView Turbo.$detailSuffix"
+            )
+        }
+        if (finalErr != null) {
+            throw finalErr
+        }
+        throw IllegalStateException(
+            "Respons Gemini Web kosong atau cookie membutuhkan penyegaran (__Secure-1PSIDTS)."
+        )
+    }
+
     /**
      * Native implementation of `gemini-web2api` directly inside the Android app using
      * `__Secure-1PSID` and `__Secure-1PSIDTS` cookies.
@@ -330,6 +621,9 @@ object GeminiWebCookieClient {
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             val tokens = fetchSessionTokensBlocking(psid, psidts)
+            // Populate live model routing hashes directly from the current Gemini Web page
+            extractLiveModelsFromHtml(tokens.rawHtml)
+
             val combinedPrompt = buildString {
                 appendLine(systemPrompt.trim())
                 appendLine()
@@ -337,70 +631,32 @@ object GeminiWebCookieClient {
                 append(numberedUserLines.trim())
             }
 
-            // Build BardFrontendService/StreamGenerate inner payload:
-            // [[prompt], null, ["", "", ""]]
-            val innerPromptArray = JSONArray().apply {
-                put(combinedPrompt)
-                put(JSONObject.NULL)
-                put(JSONArray().put("").put("").put(""))
-            }
-            val innerJsonStr = JSONArray().apply {
-                put(innerPromptArray)
-                put(JSONObject.NULL)
-                put(JSONArray().put("").put("").put(""))
-            }.toString()
-
-            val outerFreqStr = JSONArray().apply {
-                put(JSONObject.NULL)
-                put(innerJsonStr)
-            }.toString()
-
-            val firstAttemptText = executeStreamGenerateRequest(
-                psid = psid,
-                psidts = psidts,
-                tokens = tokens,
-                outerFreqStr = outerFreqStr,
-                modelHeaderVal = resolveModelHeader(modelId)
-            )
-
-            val cleanedFirst = OpenAiCompatibleClient.cleanAiModelOutput(firstAttemptText)
-            // If a specific model header was sent and Gemini Web returned blank, a refusal, or a short non-indexed message,
-            // automatically retry once without the custom model header (falling back to default Gemini Web model).
-            val hasNumberedLine = cleanedFirst.lineSequence().any { line ->
-                line.trim().matches(Regex("""^(?:[*_`~>\-\s•]*)(?:\[\s*\d+\s*\]|\d+\s*[.|:\-)]|#\d+).*"""))
-            }
-            val lowerFirst = cleanedFirst.lowercase()
-            val looksLikeRefusal = lowerFirst.contains("tidak diprogram untuk itu") ||
-                lowerFirst.contains("hanya menghasilkan teks") ||
-                lowerFirst.contains("hanya ai berbasis teks") ||
-                lowerFirst.contains("tidak bisa membantu anda untuk itu") ||
-                lowerFirst.contains("not programmed") ||
-                lowerFirst.contains("text-based ai")
-            if ((cleanedFirst.isBlank() || looksLikeRefusal || (!hasNumberedLine && cleanedFirst.lines().size < 3)) &&
-                resolveModelHeader(modelId) != null
-            ) {
-                val fallbackAttemptText = runCatching {
+            executeWithHttp400Fallback(
+                initialTokens = tokens,
+                combinedPrompt = combinedPrompt,
+                initialModelHeaderVal = resolveModelHeader(modelId),
+                refreshTokens = { fetchSessionTokensBlocking(psid, psidts) },
+                executor = { activeTokens, spec ->
                     executeStreamGenerateRequest(
                         psid = psid,
                         psidts = psidts,
-                        tokens = tokens,
-                        outerFreqStr = outerFreqStr,
-                        modelHeaderVal = null
+                        tokens = activeTokens,
+                        outerFreqStr = spec.outerFreqStr,
+                        modelHeaderVal = spec.modelHeaderVal,
+                        includeFSid = spec.includeFSid
                     )
-                }.getOrDefault("")
-                val cleanedFallback = OpenAiCompatibleClient.cleanAiModelOutput(fallbackAttemptText)
-                if (cleanedFallback.isNotBlank()) {
-                    return@runCatching cleanedFallback
                 }
-            }
-
-            if (cleanedFirst.isBlank()) {
-                throw IllegalStateException(
-                    "Respons Gemini Web kosong atau cookie membutuhkan penyegaran (__Secure-1PSIDTS)."
-                )
-            }
-            cleanedFirst
+            )
         }
+    }
+
+    private fun sanitizeErrorSnippet(rawError: String): String {
+        if (rawError.isBlank()) return ""
+        return rawError
+            .replace(Regex("<[^>]+>"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(140)
     }
 
     private fun executeStreamGenerateRequest(
@@ -408,22 +664,29 @@ object GeminiWebCookieClient {
         psidts: String,
         tokens: GeminiWebSessionTokens,
         outerFreqStr: String,
-        modelHeaderVal: String?
+        modelHeaderVal: String?,
+        includeFSid: Boolean = true
     ): String {
         val reqId = Random.nextInt(100_000, 999_999)
-        val encodedBl = URLEncoder.encode(tokens.blBuildLabel, "UTF-8")
-        val endpoint = "$GEMINI_STREAM_GENERATE_URL?bl=$encodedBl&_reqid=$reqId&rt=c"
+        val endpoint = buildStreamGenerateEndpoint(
+            blBuildLabel = tokens.blBuildLabel,
+            fSid = tokens.fSid,
+            reqId = reqId,
+            includeFSid = includeFSid
+        )
 
         val postFormBody = "f.req=" + URLEncoder.encode(outerFreqStr, "UTF-8") +
             "&at=" + URLEncoder.encode(tokens.snlm0eToken, "UTF-8") + "&"
 
-        val cookieHeader = buildCookieHeaderValue(psid, psidts)
+        val cookieHeader = mergeCookieHeaders(psid, psidts, tokens.setCookieHeaders)
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
             connectTimeout = 25_000
             readTimeout = 95_000
             setRequestProperty("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+            setRequestProperty("Accept", "*/*")
+            setRequestProperty("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
             setRequestProperty("User-Agent", USER_AGENT)
             setRequestProperty("Origin", "https://gemini.google.com")
             setRequestProperty("Referer", "https://gemini.google.com/")
@@ -443,7 +706,13 @@ object GeminiWebCookieClient {
             val code = connection.responseCode
             val rawResponse = readStream(connection, isError = code !in 200..299)
             if (code !in 200..299) {
-                throw IllegalStateException("HTTP $code saat memanggil StreamGenerate Gemini Web")
+                val snippet = sanitizeErrorSnippet(rawResponse)
+                val suffix = if (snippet.isNotBlank()) " ($snippet)" else ""
+                throw StreamGenerateHttpException(
+                    statusCode = code,
+                    responseSnippet = snippet,
+                    message = "HTTP $code saat memanggil StreamGenerate Gemini Web$suffix"
+                )
             }
 
             return parseBardStreamResponse(rawResponse)
