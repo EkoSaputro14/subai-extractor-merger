@@ -87,11 +87,11 @@ fun GeminiCookieWebViewDialog(
     var turboMode by remember { mutableStateOf(true) }
     var autoCloseOnCapture by remember { mutableStateOf(true) }
     var hasAutoSubmitted by remember { mutableStateOf(false) }
-    var currentUrl by remember { mutableStateOf(LIGHTWEIGHT_LOGIN_URL) }
+    var currentUrl by remember { mutableStateOf(GEMINI_WEB_APP_URL) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var webViewError by remember { mutableStateOf<String?>(null) }
     var statusHint by remember {
-        mutableStateOf("WebView Turbo aktif (tanpa gambar/font berat). Login akun Google untuk mengambil cookie otomatis.")
+        mutableStateOf("WebView Turbo aktif. Login sampai halaman chat gemini.google.com terbuka penuh agar __Secure-1PSID & __Secure-1PSIDTS lengkap.")
     }
 
     suspend fun readCookiesInBackground(flushToDisk: Boolean = false): ParsedGeminiCookies =
@@ -101,29 +101,39 @@ fun GeminiCookieWebViewDialog(
                 if (flushToDisk) {
                     cookieManager.flush()
                 }
+                val geminiAppCookies = cookieManager.getCookie("https://gemini.google.com/app").orEmpty()
                 val geminiCookies = cookieManager.getCookie("https://gemini.google.com").orEmpty()
                 val accountsCookies = cookieManager.getCookie("https://accounts.google.com").orEmpty()
                 val googleCookies = cookieManager.getCookie("https://www.google.com").orEmpty()
                 val rootGoogleCookies = cookieManager.getCookie("https://google.com").orEmpty()
-                val combined = "$geminiCookies; $accountsCookies; $googleCookies; $rootGoogleCookies"
+                val combined = "$geminiAppCookies; $geminiCookies; $accountsCookies; $googleCookies; $rootGoogleCookies"
                 GeminiWebCookieClient.parseSmartCookieInput(combined)
             }.getOrDefault(ParsedGeminiCookies())
         }
 
-    // Background non-blocking cookie poller: waits until BOTH __Secure-1PSID & __Secure-1PSIDTS
-    // are captured before auto-closing (so WebView doesn't close prematurely on accounts.google.com).
+    fun isActivelyOnGeminiChatPage(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.startsWith("https://gemini.google.com") &&
+            !lower.contains("accounts.google.com") &&
+            !lower.contains("servicelogin")
+    }
+
+    // Background non-blocking cookie poller: ONLY auto-closes after WebView ACTUALLY reaches
+    // gemini.google.com (not accounts.google.com!) AND captures BOTH __Secure-1PSID & __Secure-1PSIDTS.
     LaunchedEffect(autoCloseOnCapture) {
         var pollsOnGeminiWithPsidOnly = 0
         while (isActive && !hasAutoSubmitted) {
             val parsed = readCookiesInBackground(flushToDisk = false)
+            val onGeminiApp = isActivelyOnGeminiChatPage(currentUrl)
             if (parsed.isValid) {
                 detectedCookies = parsed
                 val hasBothTokens = parsed.secure1Psid.isNotBlank() && parsed.secure1Psidts.isNotBlank()
-                val onGeminiApp = currentUrl.contains("gemini.google.com", ignoreCase = true)
                 if (onGeminiApp && !hasBothTokens) {
                     pollsOnGeminiWithPsidOnly++
+                } else if (!onGeminiApp) {
+                    pollsOnGeminiWithPsidOnly = 0
                 }
-                val readyForAutoClose = hasBothTokens || (onGeminiApp && pollsOnGeminiWithPsidOnly >= 5)
+                val readyForAutoClose = onGeminiApp && (hasBothTokens || pollsOnGeminiWithPsidOnly >= 8)
                 if (autoCloseOnCapture && readyForAutoClose && !hasAutoSubmitted) {
                     hasAutoSubmitted = true
                     withContext(Dispatchers.IO) {
@@ -136,9 +146,12 @@ fun GeminiCookieWebViewDialog(
                     onCookiesExtracted(parsed)
                     onDismiss()
                     break
+                } else if (!onGeminiApp) {
+                    statusHint =
+                        "Menunggu login selesai di accounts.google.com... (PSID=${if (parsed.secure1Psid.isNotBlank()) "✓" else "✗"}, PSIDTS=${if (parsed.secure1Psidts.isNotBlank()) "✓" else "✗"}). Jika sesi lama macet, ketuk 'Reset Sesi'."
                 } else if (!hasBothTokens) {
                     statusHint =
-                        "__Secure-1PSID ditemukan! Menunggu __Secure-1PSIDTS dari gemini.google.com/app agar tidak HTTP 400..."
+                        "Halaman Gemini terbuka! Menunggu __Secure-1PSIDTS terbentuk... (PSID=✓, PSIDTS=✗)"
                 } else {
                     statusHint =
                         "Cookie __Secure-1PSID & __Secure-1PSIDTS lengkap! Ketuk 'Gunakan Cookie Ini' untuk menyimpan."
@@ -276,6 +289,43 @@ fun GeminiCookieWebViewDialog(
 
                             OutlinedButton(
                                 onClick = {
+                                    scope.launch {
+                                        detectedCookies = ParsedGeminiCookies()
+                                        hasAutoSubmitted = false
+                                        statusHint = "Cookie WebView lama dibersihkan. Silakan login ulang ke akun Google Anda..."
+                                        withContext(Dispatchers.IO) {
+                                            runCatching {
+                                                val cm = CookieManager.getInstance()
+                                                cm.removeAllCookies(null)
+                                                cm.flush()
+                                            }
+                                        }
+                                        com.example.data.AppDiagnosticLogger.info(
+                                            "WebViewCookie",
+                                            "User melakukan Reset Sesi WebView (hapus semua cookie lama)."
+                                        )
+                                        webViewRef?.loadUrl(LIGHTWEIGHT_LOGIN_URL)
+                                    }
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 40.dp)
+                                    .testTag("reset_webview_session_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Reset Sesi",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            }
+
+                            OutlinedButton(
+                                onClick = {
                                     runCatching {
                                         val intent = Intent(
                                             Intent.ACTION_VIEW,
@@ -295,9 +345,9 @@ fun GeminiCookieWebViewDialog(
                                     contentDescription = null,
                                     modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "Browser HP",
+                                    text = "Browser",
                                     style = MaterialTheme.typography.labelMedium
                                 )
                             }
@@ -484,12 +534,23 @@ fun GeminiCookieWebViewDialog(
                                             if (!url.isNullOrBlank()) {
                                                 currentUrl = url
                                             }
+                                            val finishedUrl = url.orEmpty()
                                             scope.launch {
                                                 val parsed = readCookiesInBackground(flushToDisk = true)
                                                 if (parsed.isValid) {
                                                     detectedCookies = parsed
-                                                    if (autoCloseOnCapture && !hasAutoSubmitted) {
+                                                    val hasBoth = parsed.secure1Psid.isNotBlank() &&
+                                                        parsed.secure1Psidts.isNotBlank()
+                                                    if (autoCloseOnCapture &&
+                                                        !hasAutoSubmitted &&
+                                                        hasBoth &&
+                                                        isActivelyOnGeminiChatPage(finishedUrl)
+                                                    ) {
                                                         hasAutoSubmitted = true
+                                                        com.example.data.AppDiagnosticLogger.info(
+                                                            "WebViewCookie",
+                                                            "onPageFinished capture lengkap: psid=${parsed.secure1Psid.length}ch, psidts=${parsed.secure1Psidts.length}ch, url=$finishedUrl"
+                                                        )
                                                         onCookiesExtracted(parsed)
                                                         onDismiss()
                                                     }
@@ -516,7 +577,9 @@ fun GeminiCookieWebViewDialog(
                                     }
 
                                     runCatching {
-                                        loadUrl(LIGHTWEIGHT_LOGIN_URL)
+                                        // Start directly on gemini.google.com/app so already-logged-in sessions
+                                        // rotate __Secure-1PSIDTS immediately, and logged-out sessions redirect cleanly to Google login.
+                                        loadUrl(GEMINI_WEB_APP_URL)
                                     }.onFailure { err ->
                                         webViewError = "Gagal memuat WebView: ${err.localizedMessage}"
                                     }

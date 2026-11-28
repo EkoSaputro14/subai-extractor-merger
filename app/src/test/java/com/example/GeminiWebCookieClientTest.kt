@@ -281,4 +281,34 @@ class GeminiWebCookieClientTest {
         assertTrue(exported.contains("__Secure-1PSID=g.a0***"))
         assertTrue(exported.contains("__Secure-1PSIDTS=sidt***"))
     }
+
+    @Test
+    fun parseSessionTokensFromHtml_rejectsGoogleSignInRedirectEvenWhenSnlm0eIsPresent() {
+        val signInHtml = """
+            <script>
+            WIZ_global_data = {
+              "SNlM0e": "SignInPageFakeToken1234567890:111111",
+              "cfb2h": "boq_identityfrontendauthuiserver_20261119.04_p0",
+              "FdrFJe": "-482910384756129384"
+            };
+            </script>
+        """.trimIndent()
+
+        val err = runCatching {
+            GeminiWebCookieClient.parseSessionTokensFromHtml(
+                html = signInHtml,
+                finalAppUrl = "https://accounts.google.com/v3/signin/identifier?continue=https://gemini.google.com/app"
+            )
+        }.exceptionOrNull()
+
+        assertNotNull(err)
+        assertTrue(err!!.message!!.contains("accounts.google.com"))
+        assertTrue(err.message!!.contains("Reset Sesi"))
+
+        assertTrue(GeminiWebCookieClient.isTrustedGoogleCookieHost("gemini.google.com"))
+        assertTrue(GeminiWebCookieClient.isTrustedGoogleCookieHost("accounts.google.com"))
+        assertTrue(GeminiWebCookieClient.isTrustedGoogleCookieHost("google.com"))
+        assertFalse(GeminiWebCookieClient.isTrustedGoogleCookieHost("evil.com"))
+        assertFalse(GeminiWebCookieClient.isTrustedGoogleCookieHost("google.com.evil.com"))
+    }
 }

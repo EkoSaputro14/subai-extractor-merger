@@ -23,6 +23,7 @@ data class ParsedGeminiCookies(
 object GeminiWebCookieClient {
 
     private const val GEMINI_APP_URL = "https://gemini.google.com/app"
+    private const val GOOGLE_ROTATE_COOKIES_URL = "https://accounts.google.com/RotateCookies"
     private const val GEMINI_STREAM_GENERATE_URL =
         "https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate"
 
@@ -120,10 +121,12 @@ object GeminiWebCookieClient {
 
     private val discoveredModelHeaders = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val rejectedModelHeaders = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val rotatedPsidtsCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     internal fun clearRuntimeCachesForTesting() {
         discoveredModelHeaders.clear()
         rejectedModelHeaders.clear()
+        rotatedPsidtsCache.clear()
     }
 
     fun sanitizeCookieToken(rawToken: String): String {
@@ -222,11 +225,41 @@ object GeminiWebCookieClient {
         val refreshSessionBeforeAttempt: Boolean = false
     )
 
+    internal fun isTrustedGoogleCookieHost(host: String): Boolean {
+        val lower = host.lowercase().trim()
+        return lower == "google.com" ||
+            lower.endsWith(".google.com") ||
+            lower == "accounts.youtube.com"
+    }
+
+    internal fun isSignInRedirectOrAuthPage(finalAppUrl: String, blBuildLabel: String): Boolean {
+        val lowerUrl = finalAppUrl.lowercase()
+        val lowerBl = blBuildLabel.lowercase()
+        return lowerUrl.contains("accounts.google.com/") ||
+            lowerUrl.contains("/servicelogin") ||
+            lowerUrl.contains("/v3/signin") ||
+            lowerBl.contains("identityfrontendauthuiserver")
+    }
+
     internal fun parseSessionTokensFromHtml(
         html: String,
         setCookieHeaders: List<String> = emptyList(),
         finalAppUrl: String = GEMINI_APP_URL
     ): GeminiWebSessionTokens {
+        val extractedCfb2h = CFB2H_REGEX.find(html)?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() }
+        val resolvedBl = extractedCfb2h ?: DEFAULT_BL_BUILD_LABEL
+
+        if (isSignInRedirectOrAuthPage(finalAppUrl, resolvedBl)) {
+            AppDiagnosticLogger.error(
+                "GeminiWeb",
+                "Sesi ditolak: dialihkan ke halaman login Google (finalUrl=$finalAppUrl, bl=$resolvedBl)"
+            )
+            throw IllegalStateException(
+                "Sesi Gemini Web tidak aktif / kedaluwarsa (dialihkan ke halaman login accounts.google.com). " +
+                    "Buka Pengaturan AI → Login & Ambil Cookie → ketuk 'Reset Sesi', login hingga halaman chat Gemini terbuka penuh, lalu pastikan __Secure-1PSID & __Secure-1PSIDTS keduanya terdeteksi."
+            )
+        }
+
         val snlm0e = SNLM0E_REGEX.find(html)?.groupValues?.getOrNull(1).orEmpty()
         if (snlm0e.isEmpty()) {
             AppDiagnosticLogger.error(
@@ -237,12 +270,11 @@ object GeminiWebCookieClient {
                 "Token sesi SNlM0e tidak ditemukan. Pastikan cookie __Secure-1PSID & __Secure-1PSIDTS masih aktif (belum kedaluwarsa)."
             )
         }
-        val extractedCfb2h = CFB2H_REGEX.find(html)?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() }
         val fSid = FDRFJE_REGEX.find(html)?.groupValues?.getOrNull(1).orEmpty()
 
         return GeminiWebSessionTokens(
             snlm0eToken = snlm0e,
-            blBuildLabel = extractedCfb2h ?: DEFAULT_BL_BUILD_LABEL,
+            blBuildLabel = resolvedBl,
             blWasExtractedFromHtml = extractedCfb2h != null,
             fSid = fSid,
             setCookieHeaders = setCookieHeaders,
@@ -334,11 +366,22 @@ object GeminiWebCookieClient {
             val getInstance = cmClass.getMethod("getInstance")
             val cm = getInstance.invoke(null) ?: return@runCatching emptyList()
             val getCookie = cmClass.getMethod("getCookie", String::class.java)
-            val rawJar = (getCookie.invoke(cm, "https://gemini.google.com") as? String).orEmpty()
-            if (rawJar.isBlank()) return@runCatching emptyList()
+            val urls = listOf(
+                "https://gemini.google.com/app",
+                "https://gemini.google.com",
+                "https://accounts.google.com",
+                "https://google.com"
+            )
+            val allPairs = mutableListOf<String>()
+            for (u in urls) {
+                val rawJar = (getCookie.invoke(cm, u) as? String).orEmpty()
+                if (rawJar.isNotBlank()) {
+                    allPairs.addAll(rawJar.split(";").map { it.trim() }.filter { it.contains("=") })
+                }
+            }
+            if (allPairs.isEmpty()) return@runCatching emptyList()
 
-            val pairs = rawJar.split(";").map { it.trim() }.filter { it.contains("=") }
-            val jarPsid = pairs
+            val jarPsid = allPairs
                 .firstOrNull { it.substringBefore('=').trim().equals("__Secure-1PSID", ignoreCase = true) }
                 ?.substringAfter('=')
                 ?.let { sanitizeCookieToken(it) }
@@ -346,13 +389,187 @@ object GeminiWebCookieClient {
             if (jarPsid != cleanPsid) {
                 return@runCatching emptyList()
             }
-            pairs
+            allPairs
         }.getOrDefault(emptyList())
+    }
+
+    private fun extractSetCookieHeaders(connection: HttpURLConnection): List<String> {
+        return connection.headerFields
+            .entries
+            .filter { (key, _) -> key != null && key.equals("Set-Cookie", ignoreCase = true) }
+            .flatMap { (_, values) -> values.orEmpty() }
+            .filter { it.isNotBlank() }
+    }
+
+    private fun extractCookieValueFromSetCookies(setCookies: List<String>, targetName: String): String {
+        var found = ""
+        for (raw in setCookies) {
+            val pair = raw.substringBefore(';').trim()
+            val eqIdx = pair.indexOf('=')
+            if (eqIdx <= 0) continue
+            val name = pair.substring(0, eqIdx).trim()
+            val value = sanitizeCookieToken(pair.substring(eqIdx + 1))
+            if (name.equals(targetName, ignoreCase = true) &&
+                value.isNotEmpty() &&
+                !value.equals("deleted", ignoreCase = true)
+            ) {
+                found = value
+            }
+        }
+        return found
+    }
+
+    /**
+     * Calls Google's `https://accounts.google.com/RotateCookies` endpoint (matching HanaokaYuzu/Gemini-API)
+     * to obtain or refresh `__Secure-1PSIDTS` using the active Google session cookie jar.
+     */
+    private fun tryRotate1PsidtsCookiesBlocking(
+        cleanPsid: String,
+        cookieHeader: String
+    ): List<String> {
+        return runCatching {
+            val startMs = System.currentTimeMillis()
+            val connection = (URL(GOOGLE_ROTATE_COOKIES_URL).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                instanceFollowRedirects = false
+                connectTimeout = 15_000
+                readTimeout = 15_000
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("User-Agent", USER_AGENT)
+                setRequestProperty("Origin", "https://accounts.google.com")
+                setRequestProperty("Referer", "https://accounts.google.com/")
+                setRequestProperty("Cookie", cookieHeader)
+            }
+            try {
+                OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { writer ->
+                    writer.write("""[000,"-0000000000000000000"]""")
+                    writer.flush()
+                }
+                val code = connection.responseCode
+                val elapsedMs = System.currentTimeMillis() - startMs
+                val rotatedSetCookies = extractSetCookieHeaders(connection)
+                readStream(connection, isError = code !in 200..299)
+                val newPsidts = extractCookieValueFromSetCookies(rotatedSetCookies, "__Secure-1PSIDTS")
+                if (newPsidts.isNotBlank()) {
+                    rotatedPsidtsCache[cleanPsid] = newPsidts
+                }
+                AppDiagnosticLogger.http(
+                    "GeminiWeb",
+                    "POST RotateCookies HTTP $code (${elapsedMs}ms) | gotPsidts=${newPsidts.isNotBlank()} | setCookies=${rotatedSetCookies.size}"
+                )
+                rotatedSetCookies
+            } finally {
+                connection.disconnect()
+            }
+        }.onFailure { err ->
+            AppDiagnosticLogger.warn("GeminiWeb", "RotateCookies gagal: ${err.message}")
+        }.getOrDefault(emptyList())
+    }
+
+    private data class RedirectedGetResponse(
+        val statusCode: Int,
+        val finalUrl: String,
+        val body: String,
+        val accumulatedSetCookies: List<String>,
+        val elapsedMs: Long
+    )
+
+    /**
+     * Manually follows HTTP 301/302/303/307/308 redirects across trusted `*.google.com` hosts while
+     * preserving and updating the `Cookie` header on EVERY hop (unlike Android's default
+     * `HttpURLConnection.instanceFollowRedirects`, which drops `Cookie` across cross-subdomain
+     * passive SSO redirects between `gemini.google.com` and `accounts.google.com`).
+     */
+    private fun performGetWithGoogleCookieJar(
+        initialUrl: String,
+        cleanPsid: String,
+        effectivePsidts: String,
+        initialSetCookies: List<String>,
+        maxRedirects: Int = 8
+    ): RedirectedGetResponse {
+        val accumulatedSetCookies = initialSetCookies.toMutableList()
+        var currentUrl = initialUrl
+        val startMs = System.currentTimeMillis()
+
+        for (hop in 0..maxRedirects) {
+            val urlObj = URL(currentUrl)
+            val cookieHeader = if (isTrustedGoogleCookieHost(urlObj.host)) {
+                mergeCookieHeaders(cleanPsid, effectivePsidts, accumulatedSetCookies)
+            } else {
+                ""
+            }
+            val connection = (urlObj.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                instanceFollowRedirects = false
+                connectTimeout = 20_000
+                readTimeout = 25_000
+                setRequestProperty("User-Agent", USER_AGENT)
+                setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                setRequestProperty("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
+                if (cookieHeader.isNotEmpty()) {
+                    setRequestProperty("Cookie", cookieHeader)
+                }
+            }
+
+            try {
+                val code = connection.responseCode
+                val hopSetCookies = extractSetCookieHeaders(connection)
+                if (hopSetCookies.isNotEmpty()) {
+                    accumulatedSetCookies.addAll(hopSetCookies)
+                    val refreshedPsidts = extractCookieValueFromSetCookies(hopSetCookies, "__Secure-1PSIDTS")
+                    if (refreshedPsidts.isNotBlank()) {
+                        rotatedPsidtsCache[cleanPsid] = refreshedPsidts
+                    }
+                }
+
+                if (code in listOf(301, 302, 303, 307, 308)) {
+                    val location = connection.getHeaderField("Location").orEmpty()
+                    readStream(connection, isError = false)
+                    if (location.isBlank() || hop == maxRedirects) {
+                        return RedirectedGetResponse(
+                            statusCode = code,
+                            finalUrl = currentUrl,
+                            body = "",
+                            accumulatedSetCookies = accumulatedSetCookies,
+                            elapsedMs = System.currentTimeMillis() - startMs
+                        )
+                    }
+                    val nextUrl = URL(urlObj, location).toString()
+                    AppDiagnosticLogger.http(
+                        "GeminiWeb",
+                        "GET hop #$hop HTTP $code -> ${nextUrl.take(110)} (setCookies=${hopSetCookies.size})"
+                    )
+                    currentUrl = nextUrl
+                    continue
+                }
+
+                val body = readStream(connection, isError = code !in 200..299)
+                return RedirectedGetResponse(
+                    statusCode = code,
+                    finalUrl = currentUrl,
+                    body = body,
+                    accumulatedSetCookies = accumulatedSetCookies,
+                    elapsedMs = System.currentTimeMillis() - startMs
+                )
+            } finally {
+                connection.disconnect()
+            }
+        }
+
+        return RedirectedGetResponse(
+            statusCode = 0,
+            finalUrl = currentUrl,
+            body = "",
+            accumulatedSetCookies = accumulatedSetCookies,
+            elapsedMs = System.currentTimeMillis() - startMs
+        )
     }
 
     private fun fetchSessionTokensBlocking(psid: String, psidts: String): GeminiWebSessionTokens {
         val cleanPsid = sanitizeCookieToken(psid)
-        val cleanPsidts = sanitizeCookieToken(psidts)
+        val cachedRotatedPsidts = rotatedPsidtsCache[cleanPsid].orEmpty()
+        val effectivePsidts = sanitizeCookieToken(psidts).ifEmpty { cachedRotatedPsidts }
         if (cleanPsid.isEmpty()) {
             AppDiagnosticLogger.error("GeminiWeb", "Cookie __Secure-1PSID kosong saat memulai permintaan.")
             throw IllegalArgumentException(
@@ -360,69 +577,78 @@ object GeminiWebCookieClient {
             )
         }
 
-        val webViewJarCookies = readMatchingWebViewSetCookies(cleanPsid)
-        val initialCookieHeader = mergeCookieHeaders(cleanPsid, cleanPsidts, webViewJarCookies)
-        val hasPsidtsInJar = initialCookieHeader.contains("__Secure-1PSIDTS=", ignoreCase = true)
-        if (!hasPsidtsInJar) {
+        val accumulatedCookies = readMatchingWebViewSetCookies(cleanPsid).toMutableList()
+        val preFlightCookieHeader = mergeCookieHeaders(cleanPsid, effectivePsidts, accumulatedCookies)
+        val hasPsidtsInitially = preFlightCookieHeader.contains("__Secure-1PSIDTS=", ignoreCase = true)
+
+        // If __Secure-1PSIDTS is missing, proactively attempt Google RotateCookies first
+        if (!hasPsidtsInitially) {
             AppDiagnosticLogger.warn(
                 "GeminiWeb",
-                "__Secure-1PSIDTS kosong (psid=${cleanPsid.length}ch, webViewJar=${webViewJarCookies.size} cookies). Server Google sering menolak StreamGenerate dengan HTTP 400 tanpa __Secure-1PSIDTS."
+                "__Secure-1PSIDTS kosong (psid=${cleanPsid.length}ch, webViewJar=${accumulatedCookies.size} cookies). Mencoba RotateCookies otomatis..."
             )
-        }
-
-        val startMs = System.currentTimeMillis()
-        val connection = (URL(GEMINI_APP_URL).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            instanceFollowRedirects = true
-            connectTimeout = 20_000
-            readTimeout = 25_000
-            setRequestProperty("User-Agent", USER_AGENT)
-            setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-            setRequestProperty("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
-            setRequestProperty("Cookie", initialCookieHeader)
-        }
-
-        try {
-            val code = connection.responseCode
-            val elapsedMs = System.currentTimeMillis() - startMs
-            val finalUrl = runCatching { connection.url.toString() }.getOrDefault(GEMINI_APP_URL)
-            val html = readStream(connection, isError = code !in 200..299)
-            if (code !in 200..299) {
-                AppDiagnosticLogger.error(
-                    "GeminiWeb",
-                    "GET /app gagal HTTP $code (${elapsedMs}ms) finalUrl=$finalUrl"
-                )
-                throw IllegalStateException("HTTP $code saat menghubungi gemini.google.com/app")
+            val rotated = tryRotate1PsidtsCookiesBlocking(cleanPsid, preFlightCookieHeader)
+            if (rotated.isNotEmpty()) {
+                accumulatedCookies.addAll(rotated)
             }
-
-            val serverSetCookies = connection.headerFields
-                .entries
-                .filter { (key, _) -> key != null && key.equals("Set-Cookie", ignoreCase = true) }
-                .flatMap { (_, values) -> values.orEmpty() }
-                .filter { it.isNotBlank() }
-
-            val combinedSetCookies = webViewJarCookies + serverSetCookies
-            val cookieNames = combinedSetCookies.mapNotNull { h ->
-                h.substringBefore(';').substringBefore('=').trim().takeIf { it.isNotEmpty() }
-            }.distinct()
-
-            val tokens = parseSessionTokensFromHtml(
-                html = html,
-                setCookieHeaders = combinedSetCookies,
-                finalAppUrl = finalUrl
-            )
-            AppDiagnosticLogger.http(
-                "GeminiWeb",
-                "GET /app HTTP $code (${elapsedMs}ms) finalUrl=$finalUrl | " +
-                    "SNlM0e=${tokens.snlm0eToken.length}ch | " +
-                    "bl=${if (tokens.blWasExtractedFromHtml) tokens.blBuildLabel else "(tidak ditemukan)"} | " +
-                    "f.sid=${if (tokens.fSid.isNotBlank()) "ada(${tokens.fSid.length}ch)" else "kosong"} | " +
-                    "cookies=[${cookieNames.joinToString(",")}]"
-            )
-            return tokens
-        } finally {
-            connection.disconnect()
         }
+
+        var response = performGetWithGoogleCookieJar(
+            initialUrl = GEMINI_APP_URL,
+            cleanPsid = cleanPsid,
+            effectivePsidts = effectivePsidts,
+            initialSetCookies = accumulatedCookies
+        )
+
+        // If GET /app bounced to accounts.google.com and we didn't rotate yet, try RotateCookies once and retry GET /app
+        if (response.statusCode in 200..299 &&
+            isSignInRedirectOrAuthPage(response.finalUrl, "") &&
+            hasPsidtsInitially
+        ) {
+            AppDiagnosticLogger.warn(
+                "GeminiWeb",
+                "GET /app dialihkan ke login meski __Secure-1PSIDTS ada; mencoba RotateCookies lalu ulangi GET /app..."
+            )
+            val rotated = tryRotate1PsidtsCookiesBlocking(
+                cleanPsid,
+                mergeCookieHeaders(cleanPsid, effectivePsidts, response.accumulatedSetCookies)
+            )
+            if (rotated.isNotEmpty()) {
+                response = performGetWithGoogleCookieJar(
+                    initialUrl = GEMINI_APP_URL,
+                    cleanPsid = cleanPsid,
+                    effectivePsidts = effectivePsidts,
+                    initialSetCookies = response.accumulatedSetCookies + rotated
+                )
+            }
+        }
+
+        if (response.statusCode !in 200..299) {
+            AppDiagnosticLogger.error(
+                "GeminiWeb",
+                "GET /app gagal HTTP ${response.statusCode} (${response.elapsedMs}ms) finalUrl=${response.finalUrl}"
+            )
+            throw IllegalStateException("HTTP ${response.statusCode} saat menghubungi gemini.google.com/app")
+        }
+
+        val cookieNames = response.accumulatedSetCookies.mapNotNull { h ->
+            h.substringBefore(';').substringBefore('=').trim().takeIf { it.isNotEmpty() }
+        }.distinct()
+
+        val tokens = parseSessionTokensFromHtml(
+            html = response.body,
+            setCookieHeaders = response.accumulatedSetCookies,
+            finalAppUrl = response.finalUrl
+        )
+        AppDiagnosticLogger.http(
+            "GeminiWeb",
+            "GET /app HTTP ${response.statusCode} (${response.elapsedMs}ms) finalUrl=${response.finalUrl} | " +
+                "SNlM0e=${tokens.snlm0eToken.length}ch | " +
+                "bl=${if (tokens.blWasExtractedFromHtml) tokens.blBuildLabel else "(tidak ditemukan)"} | " +
+                "f.sid=${if (tokens.fSid.isNotBlank()) "ada(${tokens.fSid.length}ch)" else "kosong"} | " +
+                "cookies=[${cookieNames.joinToString(",")}]"
+        )
+        return tokens
     }
 
     /**
